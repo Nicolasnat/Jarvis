@@ -800,6 +800,61 @@ def garantir_opencode(conversa, texto: str, chamadas: set) -> set:
     return chamadas | {"pedir_ao_opencode"}
 
 
+def extrair_resposta(conversa) -> str:
+    for mensagem in reversed(conversa):
+        if mensagem.get("role") == "assistant" and mensagem.get("content"):
+            return mensagem["content"]
+    return ""
+
+
+def rodar_modo_voz(conversa):
+    import voz
+
+    if not voz.disponivel():
+        print(voz.mensagem_indisponivel())
+        return
+
+    voz.falar("Jarvis online.")
+    print("Modo voz ativo. Diga 'Jarvis' para falar. Ctrl+C encerra.", flush=True)
+
+    while True:
+        try:
+            print("Ouvindo 'Jarvis'...", flush=True)
+            if not voz.escutar_wakeword():
+                continue
+            voz.falar("Pois nao?")
+            texto = voz.transcrever()
+        except KeyboardInterrupt:
+            print("\nEncerrando voz.")
+            break
+
+        if not texto:
+            voz.falar("Nao entendi.")
+            continue
+
+        print(f"Voce: {texto}", flush=True)
+        if texto.lower() in {"sair", "encerrar", "desligar", "tchau", "ate logo"}:
+            voz.falar("Ate logo.")
+            break
+
+        conversa[0]["content"] = REGRAS + memoria_para_prompt()
+        conversa.append({"role": "user", "content": texto})
+        global ULTIMO_PEDIDO
+        ULTIMO_PEDIDO = texto
+        try:
+            conversa, chamadas = rodar_turno(conversa, texto)
+            garantir_opencode(conversa, texto, chamadas)
+        except Exception as erro:
+            print(f"\nErro no turno: {erro}")
+            voz.falar("Deu erro ao processar.")
+            continue
+
+        resposta = extrair_resposta(conversa)
+        if resposta:
+            print(f"\nJarvis: {resposta}")
+            voz.falar(resposta)
+
+
 def main():
     aplicar_config_permissoes()
     if AGY:
@@ -815,9 +870,27 @@ def main():
     except Exception as erro:
         print(f"Nao consegui falar com o Ollama ({erro}). Ele esta rodando? Inicie com 'ollama serve'.\n")
 
-    # Lembretes agendados rodam em segundo plano e sobrevivem a reinicios.
-    iniciar_agenda()
     conversa = [{"role": "system", "content": REGRAS}]
+    modo_voz = "--voz" in sys.argv
+
+    if modo_voz:
+        import voz
+        if voz.disponivel():
+            iniciar_agenda(voz.falar)
+        else:
+            print(voz.mensagem_indisponivel())
+            iniciar_agenda()
+            modo_voz = False
+    else:
+        iniciar_agenda()
+
+    if modo_voz:
+        try:
+            rodar_modo_voz(conversa)
+        except Exception as erro:
+            print(f"Erro no modo voz: {erro}")
+        print("\nJarvis desligado.")
+        return
 
     while True:
         try:
