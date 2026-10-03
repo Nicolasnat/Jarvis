@@ -1,0 +1,3 @@
+# Dependencias Python do Jarvis (instale com: ./venv/bin/pip install -r requirements.txt)
+ollama
+ddgs
