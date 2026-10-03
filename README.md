@@ -16,7 +16,8 @@ Assistente de IA **local** em português do Brasil, que roda no terminal e **del
 - 🧩 **Arquitetura de plugins**: cada ferramenta é um arquivo em `ferramentas/`, carregado automaticamente
 - 🗒️ **Memória, tarefas, lembretes e anotações** persistentes em `dados/`
 - 🖥️ **Controla o sistema**: status de CPU/RAM/disco, abre e fecha programas, volume, brilho e área de transferência
-- 🎙️ **Modo voz** (`--voz`): escuta a palavra "Jarvis", transcreve e responde falando (100% offline)
+- 🎙️ **Modo voz** (`--voz`): escuta a palavra "Jarvis", transcreve e responde falando (100% offline, voz neural Piper pt-BR)
+- 🛎️ **Serviço em segundo plano** (`--servico`): roda sozinho no login, sem terminal; modelos pesados são descarregados quando ociosos
 - 📚 **RAG local**: indexe documentos (txt, md, pdf, docx) e faça perguntas com base neles
 - 📂 **Organiza arquivos**: lista projetos, cria pastas, abre o VS Code e o gerenciador de arquivos
 - ✅ **Verifica o disco**: depois de cada tarefa de código, confere se o projeto foi realmente criado (e não confia só na resposta da IA)
@@ -124,6 +125,35 @@ python jarvis.py
 python jarvis.py --voz
 ```
 
+> A voz usa o Piper (modelo `pt_BR-faber-medium`, baixado uma vez conforme [`INSTALACAO.md`](INSTALACAO.md)). Se o modelo não estiver presente, cai para `espeak-ng`/`spd-say`.
+
+### Rodando em segundo plano (sem terminal)
+
+Para o Jarvis ficar sempre disponível (é só dizer "Jarvis"), instale-o como
+serviço de usuário do systemd:
+
+```bash
+./instalar_servico.sh
+```
+
+Ele passa a iniciar sozinho no login e fica ouvindo em segundo plano. Controle:
+
+```bash
+systemctl --user status jarvis     # ver estado
+journalctl --user -u jarvis -f     # acompanhar logs
+systemctl --user stop jarvis       # parar agora
+systemctl --user start jarvis      # iniciar de novo
+systemctl --user disable --now jarvis   # remover do login
+```
+
+> **Memória sob controle**: em repouso, só o detector de wakeword fica carregado
+> (~230 MB). Os modelos pesados (Whisper, ~570 MB, e Piper) são carregados sob
+> demanda e **descarregados logo após o uso**, devolvendo a RAM ao sistema. Assim o
+> consumo acompanha apenas a função que está rodando.
+>
+> Para iniciar sem precisar fazer login (após reboot), rode uma vez:
+> `sudo loginctl enable-linger $USER`.
+
 Exemplos de pedidos:
 
 ```text
@@ -177,6 +207,8 @@ Jarvis/
 ├── jarvis.py                  # Aplicação principal (loop, intenção, segurança, pipeline)
 ├── comum.py                   # Helpers compartilhados (caminhos, JSON, memória no prompt)
 ├── voz.py                     # Wakeword, transcrição e fala (usado com --voz)
+├── jarvis.service             # Modelo do serviço systemd (usado pelo instalador)
+├── instalar_servico.sh        # Instala/ativa o Jarvis como serviço de usuário
 ├── ferramentas/
 │   ├── carregador.py          # Carrega os plugins automaticamente
 │   ├── _agenda.py             # Motor de lembretes em segundo plano

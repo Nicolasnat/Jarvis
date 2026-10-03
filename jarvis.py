@@ -808,7 +808,8 @@ def extrair_resposta(conversa) -> str:
     return ""
 
 
-def rodar_modo_voz(conversa):
+def rodar_modo_voz(conversa, servico=False):
+    import time
     import voz
 
     if not voz.disponivel():
@@ -816,7 +817,10 @@ def rodar_modo_voz(conversa):
         return
 
     voz.falar("Jarvis online.")
-    print("Modo voz ativo. Diga 'Jarvis' para falar. Ctrl+C encerra.", flush=True)
+    if servico:
+        print("Servico de voz ativo. Diga 'Jarvis'.", flush=True)
+    else:
+        print("Modo voz ativo. Diga 'Jarvis' para falar. Ctrl+C encerra.", flush=True)
 
     while True:
         try:
@@ -828,6 +832,11 @@ def rodar_modo_voz(conversa):
         except KeyboardInterrupt:
             print("\nEncerrando voz.")
             break
+        except Exception as erro:
+            print(f"[voz] Erro na escuta ({erro}); tentando de novo.", flush=True)
+            voz.descarregar()
+            time.sleep(2)
+            continue
 
         if not texto:
             voz.falar("Nao entendi.")
@@ -854,6 +863,7 @@ def rodar_modo_voz(conversa):
         if resposta:
             print(f"\nJarvis: {resposta}")
             voz.falar(resposta)
+        voz.descarregar()
 
 
 def main():
@@ -872,7 +882,8 @@ def main():
         print(f"Nao consegui falar com o Ollama ({erro}). Ele esta rodando? Inicie com 'ollama serve'.\n")
 
     conversa = [{"role": "system", "content": REGRAS}]
-    modo_voz = "--voz" in sys.argv
+    modo_servico = "--servico" in sys.argv
+    modo_voz = "--voz" in sys.argv or modo_servico
 
     if modo_voz:
         import voz
@@ -887,9 +898,11 @@ def main():
 
     if modo_voz:
         try:
-            rodar_modo_voz(conversa)
+            rodar_modo_voz(conversa, servico=modo_servico)
         except Exception as erro:
-            print(f"Erro no modo voz: {erro}")
+            print(f"Erro no modo voz: {erro}", flush=True)
+            if modo_servico:
+                return 1
         print("\nJarvis desligado.")
         return
 
@@ -921,4 +934,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

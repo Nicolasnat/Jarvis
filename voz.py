@@ -2,21 +2,68 @@
 
 A captura de audio usa o binario 'arecord' (alsa-utils), evitando depender de
 PortAudio/sounddevice. O wakeword usa openwakeword (modelo 'hey_jarvis') e a
-transcricao usa faster-whisper. A fala tenta espeak-ng, espeak e spd-say.
+transcricao usa faster-whisper. A fala usa Piper (voz neural pt-BR); se ele nao
+estiver disponivel, cai para espeak-ng/espeak/spd-say.
 """
+import ctypes
+import gc
+import re
 import shutil
 import subprocess
 import tempfile
+import threading
 import warnings
+import wave
 from pathlib import Path
+
+from comum import PASTA_DADOS
 
 TAXA = 16000
 MODELO_WHISPER = "small"
 LIMITE_WAKEWORD = 0.5
 DURACAO_FALA = 6.0
+IDIOMA_ESPEAK = "pt-br"
+IDIOMA_SPD = "pt-BR"
+VOZ_SPD = "Portuguese (Brazil)"
+
+PASTA_VOZES = PASTA_DADOS / "voz"
+MODELO_PIPER = "pt_BR-faber-medium"
 
 _modelo_wake = None
 _modelo_fala = None
+_voz_piper = None
+_piper_avisado = False
+_lock_fala = threading.Lock()
+
+# Descarga agressiva: mantem em RAM apenas o wakeword (que precisa ficar sempre
+# ouvindo). Whisper e Piper sao liberados depois de cada uso para o servico em
+# segundo plano ficar leve.
+LIBERAR_APOS_FALAR = True
+LIBERAR_APOS_TRANSCREVER = True
+
+try:
+    _libc = ctypes.CDLL("libc.so.6")
+except Exception:
+    _libc = None
+
+
+def _devolver_ram():
+    gc.collect()
+    if _libc is not None:
+        try:
+            _libc.malloc_trim(0)
+        except Exception:
+            pass
+
+
+def descarregar(fala=True, piper=True):
+    """Libera os modelos pesados e devolve a RAM ao sistema."""
+    global _modelo_fala, _voz_piper
+    if fala:
+        _modelo_fala = None
+    if piper:
+        _voz_piper = None
+    _devolver_ram()
 
 
 def _faltando():
@@ -47,29 +94,84 @@ def mensagem_indisponivel() -> str:
 
 def _comando_fala():
     if shutil.which("espeak-ng"):
-        return ["espeak-ng", "-v", "pt-br", "-s", "165"]
+        return ["espeak-ng", "-v", IDIOMA_ESPEAK, "-s", "165"]
     if shutil.which("espeak"):
-        return ["espeak", "-v", "pt-br", "-s", "165"]
+        return ["espeak", "-v", IDIOMA_ESPEAK, "-s", "165"]
     if shutil.which("spd-say"):
-        return ["spd-say", "-l", "pt-BR", "-w"]
+        return ["spd-say", "-l", IDIOMA_SPD, "-y", VOZ_SPD, "-w"]
     return None
 
 
+def _carregar_piper():
+    global _voz_piper, _piper_avisado
+    if _voz_piper is not None:
+        return _voz_piper
+    caminho = PASTA_VOZES / f"{MODELO_PIPER}.onnx"
+    if not caminho.exists():
+        if not _piper_avisado:
+            print(f"[voz] Voz natural nao encontrada em {caminho}.")
+            print("[voz] Baixe com: "
+                  f"./venv/bin/python -m piper.download_voices {MODELO_PIPER} "
+                  f"--download-dir {PASTA_VOZES}")
+            _piper_avisado = True
+        return None
+    try:
+        from piper import PiperVoice
+        _voz_piper = PiperVoice.load(str(caminho))
+    except Exception as erro:
+        print(f"[voz] Piper indisponivel ({erro}); usando espeak.")
+        return None
+    return _voz_piper
+
+
+def _tocar(arquivo) -> bool:
+    for nome, comando in (("paplay", ["paplay"]), ("pw-play", ["pw-play"]), ("aplay", ["aplay", "-q"])):
+        if shutil.which(nome):
+            subprocess.run(
+                comando + [str(arquivo)],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=180,
+            )
+            return True
+    return False
+
+
+def _limpar_para_fala(texto: str) -> str:
+    texto = re.sub(r"```.*?```", " (bloco de codigo) ", texto, flags=re.S)
+    texto = re.sub(r"`([^`]*)`", r"\1", texto)
+    texto = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", texto)
+    texto = re.sub(r"https?://\S+", "link", texto)
+    texto = re.sub(r"[*_#>~]+", "", texto)
+    return " ".join(texto.split()).strip()
+
+
 def falar(texto: str):
-    texto = (texto or "").strip()
+    texto = _limpar_para_fala(texto or "")
     if not texto:
         return
-    comando = _comando_fala()
-    if comando is None:
-        print("[voz] Nenhum sintetizador encontrado (instale espeak-ng).")
-        return
-    try:
-        subprocess.run(
-            comando + [texto],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=120,
-        )
-    except (OSError, subprocess.SubprocessError) as erro:
-        print(f"[voz] Falha ao falar: {erro}")
+    with _lock_fala:
+        voz = _carregar_piper()
+        if voz is not None:
+            try:
+                arquivo = Path(tempfile.gettempdir()) / "jarvis_fala.wav"
+                with wave.open(str(arquivo), "wb") as wav:
+                    voz.synthesize_wav(texto, wav)
+                if LIBERAR_APOS_FALAR:
+                    descarregar(fala=False, piper=True)
+                if _tocar(arquivo):
+                    return
+            except Exception as erro:
+                print(f"[voz] Piper falhou ({erro}); usando espeak.")
+        comando = _comando_fala()
+        if comando is None:
+            print("[voz] Nenhum sintetizador encontrado (instale espeak-ng ou piper-tts).")
+            return
+        try:
+            subprocess.run(
+                comando + [texto],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=120,
+            )
+        except (OSError, subprocess.SubprocessError) as erro:
+            print(f"[voz] Falha ao falar: {erro}")
 
 
 def _carregar_wake():
@@ -139,4 +241,7 @@ def transcrever(segundos=DURACAO_FALA) -> str:
         return ""
     modelo = _carregar_fala()
     segmentos, _ = modelo.transcribe(str(arquivo), language="pt", beam_size=5)
-    return " ".join(seg.text.strip() for seg in segmentos).strip()
+    texto = " ".join(seg.text.strip() for seg in segmentos).strip()
+    if LIBERAR_APOS_TRANSCREVER:
+        descarregar(fala=True, piper=False)
+    return texto
