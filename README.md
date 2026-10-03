@@ -13,6 +13,11 @@ Assistente de IA **local** em português do Brasil, que roda no terminal e **del
 - 🏗️ **Planeja antes de construir**: em projetos grandes, o Antigravity gera um plano de arquitetura que é anexado à tarefa do OpenCode
 - 🔎 **Pesquisa na web** (DuckDuckGo) para fatos atuais e documentação
 - 🧠 **Consulta um modelo especialista** (`qwen2.5:7b`) para perguntas de conhecimento e raciocínio
+- 🧩 **Arquitetura de plugins**: cada ferramenta é um arquivo em `ferramentas/`, carregado automaticamente
+- 🗒️ **Memória, tarefas, lembretes e anotações** persistentes em `dados/`
+- 🖥️ **Controla o sistema**: status de CPU/RAM/disco, abre e fecha programas, volume, brilho e área de transferência
+- 🎙️ **Modo voz** (`--voz`): escuta a palavra "Jarvis", transcreve e responde falando (100% offline)
+- 📚 **RAG local**: indexe documentos (txt, md, pdf, docx) e faça perguntas com base neles
 - 📂 **Organiza arquivos**: lista projetos, cria pastas, abre o VS Code e o gerenciador de arquivos
 - ✅ **Verifica o disco**: depois de cada tarefa de código, confere se o projeto foi realmente criado (e não confia só na resposta da IA)
 
@@ -29,7 +34,10 @@ Você ──► Jarvis (llama3.1:8b via Ollama)
               │
               ├── conhecimento geral ─► qwen2.5:7b (Ollama)
               ├── fatos atuais ───────► busca na web (DDGS)
-              └── organização ────────► criar pasta, listar, abrir VS Code / Nautilus
+              ├── memória / tarefas / lembretes ─► dados/*.json
+              ├── sistema ────────────► psutil, pactl, xclip, apps.json
+              ├── voz ────────────────► arecord + openwakeword + faster-whisper
+              └── documentos ─────────► ChromaDB + nomic-embed-text
 ```
 
 ### Divisão de trabalho
@@ -41,6 +49,7 @@ Você ──► Jarvis (llama3.1:8b via Ollama)
 | Executor de código | OpenCode | Cria/altera projetos e roda comandos de verdade |
 | Arquiteto | Antigravity (`agy`) | Gera o plano de implementação (sem criar arquivos) |
 | Segunda opinião | Claude Code (opcional) | Revisa código quando o usuário pede |
+| Embeddings | `nomic-embed-text` (Ollama) | Vetoriza documentos para o RAG local |
 
 ### Garantias contra "alucinação"
 
@@ -59,13 +68,15 @@ O Jarvis tem três camadas de proteção para o que é enviado ao OpenCode e ao 
 2. **Confirmação** — operações sensíveis mas legítimas (`sudo`, `git push`, `apt`, `chmod`, `kill -9`, `drop table`...). O Jarvis pergunta e só executa se você digitar `sim`.
 3. **Permissões do OpenCode** — o arquivo `opencode-permissoes.json` é gerado automaticamente e aplicado via `OPENCODE_CONFIG`. Ele nega leitura e escrita em `~/.ssh`, `~/.aws`, `/etc`, `/usr` etc., bloqueia `.env` e permite `rm -rf` apenas dentro da pasta de projetos.
 
+Ferramentas que executam comandos ou fecham processos passam por uma verificação central (`detectar_graves` + `confirmar_risco`). Ao fechar um programa, a confirmação é **sempre** pedida. O plugin `indexar_documentos` só aceita caminhos dentro da sua pasta pessoal e recusa pastas de credenciais e arquivos `.env`.
+
 > ⚠️ **Atenção:** o Antigravity roda com `--dangerously-skip-permissions`. As regras para ele são injetadas num bloco gerenciado do `~/.gemini/GEMINI.md` (o conteúdo existente é preservado), mas isso é uma instrução ao modelo, não um bloqueio técnico. Use com cuidado.
 
 ---
 
 ## 📋 Pré-requisitos
 
-- **Linux** (usa `xdg-open` para abrir pastas)
+- **Linux** (usa `xdg-open`, `arecord` e notificações do desktop)
 - **Python 3.10+**
 - **[Ollama](https://ollama.com)** instalado e rodando
 - **[OpenCode](https://opencode.ai)** instalado (comando `opencode` no PATH)
@@ -73,6 +84,7 @@ O Jarvis tem três camadas de proteção para o que é enviado ao OpenCode e ao 
   - **Antigravity** (`agy`) — habilita planejamento e a ferramenta `pedir_ao_antigravity`
   - **Claude Code** (`claude`) — habilita a segunda opinião
   - **VS Code** (`code`) — para a ferramenta de abrir editor
+  - `brightnessctl` — para a ferramenta de brilho
 
 Ferramentas opcionais só aparecem se o binário estiver instalado.
 
@@ -89,20 +101,27 @@ cd Jarvis
 python3 -m venv venv
 source venv/bin/activate
 
-# 3. Instale as dependências
-pip install ollama ddgs
+# 3. Instale as dependências Python
+pip install -r requirements.txt
 
 # 4. Baixe os modelos
 ollama pull llama3.1:8b
 ollama pull qwen2.5:7b
+ollama pull nomic-embed-text
 ```
+
+Pacotes de sistema (opcionais) estão listados em [`INSTALACAO.md`](INSTALACAO.md).
 
 ## ▶️ Uso
 
 Com o Ollama rodando (`ollama serve`):
 
 ```bash
+# Modo texto (padrão)
 python jarvis.py
+
+# Modo voz: diga "Jarvis" para falar; Ctrl+C encerra
+python jarvis.py --voz
 ```
 
 Exemplos de pedidos:
@@ -110,10 +129,13 @@ Exemplos de pedidos:
 ```text
 Você: crie um projeto React com Vite chamado minha-loja
 Você: planeje a arquitetura de uma API de tarefas em Node e depois construa
-Você: liste meus projetos
-Você: abre a pasta minha-loja no VS Code
-Você: pesquise as novidades do Python 3.14
-Você: explique o que é recursão
+Você: lembre que meu café é sem açúcar
+Você: me lembra de beber água em 20 minutos
+Você: adicione "revisar o PR" às minhas tarefas
+Você: como está o sistema?
+Você: abra o navegador
+Você: deixe o volume em 40
+Você: indexe a pasta ~/Documentos/faculdade e me explique o capítulo 3
 ```
 
 Para encerrar, digite `sair`.
@@ -144,14 +166,28 @@ As constantes ficam no topo do `jarvis.py`:
 
 As listas `BLOQUEIOS`, `CREDENCIAIS`, `CONFIRMACOES` e `CAMINHOS_PROIBIDOS` definem a política de segurança.
 
+A lista de programas que o Jarvis pode abrir/fechar fica em [`config/apps.json`](config/apps.json).
+
 ---
 
 ## 🗂️ Estrutura
 
 ```
 Jarvis/
-├── jarvis.py                 # Aplicação principal (loop de conversa, ferramentas, segurança)
-├── opencode-permissoes.json  # Gerado automaticamente com as permissões do OpenCode
+├── jarvis.py                  # Aplicação principal (loop, intenção, segurança, pipeline)
+├── comum.py                   # Helpers compartilhados (caminhos, JSON, memória no prompt)
+├── voz.py                     # Wakeword, transcrição e fala (usado com --voz)
+├── ferramentas/
+│   ├── carregador.py          # Carrega os plugins automaticamente
+│   ├── _agenda.py             # Motor de lembretes em segundo plano
+│   ├── _rag.py                # Motor do RAG (ChromaDB + nomic-embed-text)
+│   └── *.py                   # Um arquivo por ferramenta
+├── config/
+│   └── apps.json              # Programas que podem ser abertos/fechados
+├── dados/                     # Memória, tarefas, lembretes e índice vetorial (não versionado)
+├── requirements.txt
+├── INSTALACAO.md
+├── PLANO.md                   # Plano de arquitetura gerado pelo Antigravity
 └── README.md
 ```
 
@@ -168,14 +204,24 @@ Jarvis/
 | `criar_pasta` | Cria diretórios vazios |
 | `listar_projetos` | Lista os projetos da pasta de trabalho |
 | `abrir_pasta` | Abre no gerenciador de arquivos |
-| `abrir_vscode` | Abre no VS Code |
+| `abrir_vscode` | Abre no VS Code *(opcional)* |
+| `lembrar_fato` / `buscar_memoria` / `esquecer_fato` | Memória de fatos sobre o usuário |
+| `adicionar_tarefa` / `listar_tarefas` / `concluir_tarefa` | Lista de tarefas |
+| `agendar_lembrete` / `listar_lembretes` / `cancelar_lembrete` | Lembretes com notificação |
+| `anotar` | Anotações rápidas por dia |
+| `status_sistema` | CPU, RAM, disco, uptime e bateria |
+| `abrir_programa` / `fechar_programa` | Abre/fecha programas da lista permitida |
+| `definir_volume` | Volume do sistema (0–100) |
+| `definir_brilho` | Brilho da tela (requer `brightnessctl`) *(opcional)* |
+| `ler_clipboard` / `copiar_clipboard` | Área de transferência |
+| `indexar_documentos` / `perguntar_documentos` | RAG local sobre seus arquivos |
 
 ---
 
 ## 🗺️ Ideias para o futuro
 
-- [ ] Entrada e saída por voz
-- [ ] Memória persistente entre sessões
+- [x] Entrada e saída por voz
+- [x] Memória persistente entre sessões
 - [ ] Suporte a Windows e macOS
 - [ ] Testes automatizados para o roteamento de intenção e a política de segurança
 
