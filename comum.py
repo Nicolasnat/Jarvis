@@ -5,6 +5,7 @@ criar import circular com o jarvis.py (que roda como __main__).
 """
 import json
 import re
+import unicodedata
 from pathlib import Path
 
 BASE_PROJETO = Path(__file__).resolve().parent
@@ -56,6 +57,29 @@ def esquema(propriedades, obrigatorias):
     return {"type": "object", "properties": propriedades, "required": obrigatorias}
 
 
+ARTIGOS = {"o", "a", "os", "as", "um", "uma"}
+
+
+def sem_acentos(texto: str) -> str:
+    """'Acentuação' vira 'Acentuacao', para comparar o que foi falado com o nome do app."""
+    normalizado = unicodedata.normalize("NFKD", str(texto or ""))
+    return "".join(c for c in normalizado if not unicodedata.combining(c))
+
+
+def chave_nome(texto: str) -> str:
+    """Normaliza um nome falado para comparar: minusculo, sem acento e sem artigos.
+
+    'o Visual Studio Code' e 'visual studio code' viram a mesma chave, que e o
+    que o Whisper devolve depois de listening do usuario. Preposicoes sao
+    mantidas de proposito: em portugues boa parte dos apps se chama
+    'gerenciador de arquivos', 'mesa de som'.
+    """
+    limpo = sem_acentos(texto).lower()
+    limpo = re.sub(r"[^a-z0-9]+", " ", limpo)
+    palavras = [p for p in limpo.split() if p and p not in ARTIGOS]
+    return " ".join(palavras)
+
+
 TEXTO = {"type": "string"}
 
 
@@ -105,3 +129,17 @@ def memoria_para_prompt(limite=8) -> str:
     if not linhas:
         return ""
     return "\n\nO que voce ja sabe sobre o usuario (memoria):\n" + "\n".join(linhas)
+
+
+def apps_para_prompt(limite=120) -> str:
+    """Lista os aplicativos que o Jarvis pode abrir, para o modelo escolher o nome certo."""
+    apps = ler_json(ARQUIVO_APPS, {})
+    if not apps:
+        return ""
+    nomes = [nome.replace("_", " ") for nome in sorted(apps)[:limite]]
+    if not nomes:
+        return ""
+    return (
+        "\n\nAplicativos que voce pode abrir com abrir_programa "
+        "(use o nome como aparece aqui):\n" + ", ".join(nomes)
+    )

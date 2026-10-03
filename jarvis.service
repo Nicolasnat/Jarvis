@@ -6,6 +6,7 @@ PartOf=graphical-session.target
 [Service]
 Type=simple
 WorkingDirectory=@PROJETO@
+ExecStartPre=@PROJETO@/ajustar_microfone.sh
 ExecStart=@PROJETO@/venv/bin/python @PROJETO@/jarvis.py --servico
 Restart=on-failure
 RestartSec=5
