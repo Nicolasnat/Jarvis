@@ -2,3 +2,6 @@
 ollama
 ddgs
 psutil
+faster-whisper
+openwakeword
+av==12.3.0

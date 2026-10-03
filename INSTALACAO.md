@@ -20,12 +20,13 @@ quando quiser (rode o comando voce mesmo):
 | `pulseaudio-utils` | controlar volume (`pactl`) | 3 |
 | `brightnessctl` | controlar brilho da tela | 3 |
 | `xclip` ou `wl-clipboard` | area de transferencia | 3 |
-| `espeak-ng` | voz sintetizada (alternativa ao Piper) | 4 |
+| `alsa-utils` | captura de audio da voz (`arecord`) | 4 |
+| `espeak-ng` | voz sintetizada (ou use `speech-dispatcher`/`spd-say`) | 4 |
 
 Comando unico (opcional):
 
 ```bash
-sudo apt install xdg-utils libnotify-bin pulseaudio-utils brightnessctl xclip espeak-ng
+sudo apt install xdg-utils libnotify-bin pulseaudio-utils brightnessctl xclip alsa-utils espeak-ng
 ```
 
 ## Modelos do Ollama
