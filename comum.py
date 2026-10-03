@@ -92,6 +92,7 @@ def salvar_json(caminho, dados):
 ARQUIVO_MEMORIA = PASTA_DADOS / "memoria.json"
 ARQUIVO_TAREFAS = PASTA_DADOS / "tarefas.json"
 ARQUIVO_LEMBRETES = PASTA_DADOS / "lembretes.json"
+ARQUIVO_APPS = PASTA_CONFIG / "apps.json"
 
 
 def memoria_para_prompt(limite=8) -> str:

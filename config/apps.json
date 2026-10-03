@@ -1,0 +1,10 @@
+{
+  "vscode": ["code"],
+  "navegador": ["firefox"],
+  "firefox": ["firefox"],
+  "arquivos": ["nautilus"],
+  "terminal": ["gnome-terminal"],
+  "spotify": ["spotify"],
+  "visualizador_imagem": ["eog"],
+  "leitor_pdf": ["evince"]
+}
