@@ -5,3 +5,6 @@ psutil
 faster-whisper
 openwakeword
 av==12.3.0
+chromadb
+pypdf
+python-docx
