@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import sys
 import inspect
 import shutil
 import subprocess
@@ -14,9 +15,10 @@ import ollama
 from comum import (
     PASTA_TRABALHO, PASTA_DADOS, PASTA_CONFIG, BASE_PROJETO,
     MODELO_ESPECIALISTA, resolver, esquema, TEXTO,
-    limpar_ansi, resumir_busca,
+    limpar_ansi, resumir_busca, memoria_para_prompt,
 )
 from ferramentas.carregador import carregar_plugins
+from ferramentas._agenda import iniciar as iniciar_agenda
 
 
 MODELO = "llama3.1:8b"
@@ -648,6 +650,8 @@ SUA DIVISAO DE TRABALHO (obrigatoria):
 3. SO use 'criar_pasta' para diretorios vazios de organizacao, nunca para projetos.
 4. Use 'abrir_vscode' e 'abrir_pasta' para abrir janelas.
 5. Use 'pesquisar_na_web' para fatos atuais, noticias e documentacao. Para perguntas de conhecimento geral (biografia, historia, ciencia, matematica, programacao) prefira 'perguntar_qwen'.
+6. MEMORIA: quando o usuario pedir para voce lembrar de algo (preferencias, dados pessoais, senhas nao), chame 'lembrar_fato'. Se a resposta estiver na secao de memoria do sistema, use-a. Use 'buscar_memoria'/'esquecer_fato' quando fizer sentido.
+7. RECADOS E TAREFAS: para "me lembra daqui a X" use 'agendar_lembrete'; para listas de afazeres use 'adicionar_tarefa'/'listar_tarefas'/'concluir_tarefa'; para anotar algo solto use 'anotar'.
 
 ANTI-ALUCINACAO (obrigatoria):
 - Nunca afirme que fez algo sem antes ter chamado a ferramenta correspondente.
@@ -810,6 +814,8 @@ def main():
     except Exception as erro:
         print(f"Nao consegui falar com o Ollama ({erro}). Ele esta rodando? Inicie com 'ollama serve'.\n")
 
+    # Lembretes agendados rodam em segundo plano e sobrevivem a reinicios.
+    iniciar_agenda()
     conversa = [{"role": "system", "content": REGRAS}]
 
     while True:
@@ -823,6 +829,8 @@ def main():
         if texto.lower() in {"sair", "exit", "quit"}:
             break
 
+        # Injeta a memoria relevante no prompt do sistema antes de cada turno.
+        conversa[0]["content"] = REGRAS + memoria_para_prompt()
         conversa.append({"role": "user", "content": texto})
         global ULTIMO_PEDIDO
         ULTIMO_PEDIDO = texto

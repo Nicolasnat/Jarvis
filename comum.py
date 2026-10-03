@@ -3,6 +3,7 @@
 Fica num modulo separado para que os plugins possam importar helpers sem
 criar import circular com o jarvis.py (que roda como __main__).
 """
+import json
 import re
 from pathlib import Path
 
@@ -11,6 +12,7 @@ PASTA_TRABALHO = Path.home() / "projetos"
 PASTA_TRABALHO.mkdir(parents=True, exist_ok=True)
 PASTA_DADOS = BASE_PROJETO / "dados"
 PASTA_CONFIG = BASE_PROJETO / "config"
+PASTA_NOTAS = PASTA_DADOS / "notas"
 
 MODELO_ESPECIALISTA = "qwen2.5:7b"
 
@@ -70,3 +72,35 @@ def resumir_busca(web: str, limite=1800) -> str:
 def garantir_pasta_dados() -> Path:
     PASTA_DADOS.mkdir(parents=True, exist_ok=True)
     return PASTA_DADOS
+
+
+def ler_json(caminho, padrao):
+    """Le um JSON local; devolve o padrao se o arquivo nao existir ou estiver corrompido."""
+    try:
+        return json.loads(Path(caminho).read_text())
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        return padrao
+
+
+def salvar_json(caminho, dados):
+    caminho = Path(caminho)
+    caminho.parent.mkdir(parents=True, exist_ok=True)
+    caminho.write_text(json.dumps(dados, indent=2, ensure_ascii=False))
+    return caminho
+
+
+ARQUIVO_MEMORIA = PASTA_DADOS / "memoria.json"
+ARQUIVO_TAREFAS = PASTA_DADOS / "tarefas.json"
+ARQUIVO_LEMBRETES = PASTA_DADOS / "lembretes.json"
+
+
+def memoria_para_prompt(limite=8) -> str:
+    """Devolve um resumo curto da memoria para injetar no prompt do sistema."""
+    fatos = ler_json(ARQUIVO_MEMORIA, [])
+    if not fatos:
+        return ""
+    recentes = fatos[-limite:]
+    linhas = [f"- {item.get('fato', '')}" for item in recentes if item.get("fato")]
+    if not linhas:
+        return ""
+    return "\n\nO que voce ja sabe sobre o usuario (memoria):\n" + "\n".join(linhas)
