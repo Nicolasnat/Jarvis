@@ -198,6 +198,23 @@ As listas `BLOQUEIOS`, `CREDENCIAIS`, `CONFIRMACOES` e `CAMINHOS_PROIBIDOS` defi
 
 A lista de programas que o Jarvis pode abrir/fechar fica em [`config/apps.json`](config/apps.json).
 
+### 📦 Descobrir aplicativos
+
+O `apps.json` é gerado a partir dos arquivos `.desktop` do sistema. Diga
+**"Jarvis, lê meus aplicativos"** (ou rode `descobrir_apps`) e ele registra
+tudo que estiver instalado, com apelidos em português — "Visual Studio Code"
+também responde a `vscode` e `code`. A busca ignora acentos, maiúsculas e
+artigos, então "abre o gerenciador de arquivos" acha o `nautilus`.
+
+Cada varredura é idempotente: nomes que saíram do sistema são descartados e os
+que você adicionou à mão são preservados. Para conferir a lista, pergunte
+**"quais aplicativos você abre?"**.
+
+O scanner cobre pacotes nativos, Snap e Flatpak — o Google Chrome, por exemplo,
+é Flatpak e só aparece se as pastas `flatpak/exports/share/applications`
+estiverem na varredura. Nomes cadastrados à mão não são sobrescritos: seu
+`navegador` continua apontando para o Firefox mesmo com o Chrome instalado.
+
 ---
 
 ## 🗂️ Estrutura
@@ -213,9 +230,11 @@ Jarvis/
 │   ├── carregador.py          # Carrega os plugins automaticamente
 │   ├── _agenda.py             # Motor de lembretes em segundo plano
 │   ├── _rag.py                # Motor do RAG (ChromaDB + nomic-embed-text)
+│   ├── _spotify.py            # Cliente do Spotify Web API (PKCE, sem dependências)
 │   └── *.py                   # Um arquivo por ferramenta
 ├── config/
-│   └── apps.json              # Programas que podem ser abertos/fechados
+│   ├── apps.json              # Programas que podem ser abertos/fechados
+│   └── spotify.json           # Client ID do Spotify (não versionado)
 ├── dados/                     # Memória, tarefas, lembretes e índice vetorial (não versionado)
 ├── requirements.txt
 ├── INSTALACAO.md
@@ -243,6 +262,8 @@ Jarvis/
 | `anotar` | Anotações rápidas por dia |
 | `status_sistema` | CPU, RAM, disco, uptime e bateria |
 | `abrir_programa` / `fechar_programa` | Abre/fecha programas da lista permitida |
+| `descobrir_apps` / `listar_apps` | Escaneia os apps instalados e lista os disponíveis |
+| `spotify` | Toca música pelo nome, pausar, próxima, volume *(exige Spotify Premium)* |
 | `definir_volume` | Volume do sistema (0–100) |
 | `definir_brilho` | Brilho da tela (requer `brightnessctl`) *(opcional)* |
 | `ler_clipboard` / `copiar_clipboard` | Área de transferência |

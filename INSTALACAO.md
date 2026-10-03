@@ -40,6 +40,79 @@ A voz natural em portugues do Brasil usa o Piper (`piper-tts`, instalado pelo
 
 Sem esse modelo, o Jarvis cai automaticamente para espeak-ng/spd-say (mais robotico).
 
+## Microfone (importante)
+
+O `openwakeword` so reconhece a wakeword se o audio chegar em um nivel
+sane. Em notebooks com DMIC (controlado pelo `sofhdadsp`) o ganho vem de
+fabrica no maximo e o sinal **estoura**; com audio estourado nem a wakeword
+nem o Whisper funcionam. O servico ja corrige isso sozinho ao iniciar
+(`ExecStartPre`), mas voce pode conferir ou ajustar na mao:
+
+```bash
+./ajustar_microfone.sh              # ajusta Dmic0 e Capture
+./ajustar_microfone.sh 21 35         # ou informe os niveis (0-63 / 0-70)
+```
+
+Para testar a deteccao sem o servico no meio:
+
+```bash
+./venv/bin/python jarvis.py --voz
+```
+
+Se ele responder "Nao entendi" logo apos ativar a wakeword, o problema nao e
+a wakeword: e o Whisper. Se nao responder a voz nenhuma, confira os logs.
+
+## Musica no Spotify
+
+O plugin `spotify` usa a **Web API do Spotify**: ele busca a faixa pelo nome e
+manda o player do proprio Spotify tocar (com audio no Spotify Connect).
+
+Duas coisas do lado do Spotify sao obrigatorias:
+
+1. **Conta Premium.** Tocar pelo Web API nao funciona em conta gratuita.
+2. **Um app seu no painel.** Em <https://developer.spotify.com/dashboard>:
+   - crie um app e pegue o **Client ID**;
+   - em *Settings*, adicione o Redirect URI exato:
+     `http://127.0.0.1:8898/callback`;
+   - em *User management*, adicione o seu proprio e-mail (o Spotify exige isso
+     para apps novos).
+
+Depois cole o Client ID em `config/spotify.json`:
+
+```json
+{ "client_id": "SEU_CLIENT_ID" }
+```
+
+E autorize uma vez (abre o navegador e mostra um "Jarvis conectado"):
+
+```bash
+./venv/bin/python -c "from ferramentas import spotify; print(spotify.funcao('conectar'))"
+```
+
+O plugin escolhe onde tocar: **prefere o computador**. Se o Spotify não
+estiver aberto, o próprio Jarvis sobe o aplicativo antes de dar play.
+
+> **Se o Spotify do PC não abre** (some e volta na hora, sem mensagem): o snap
+> morre na inicialização da GPU com drivers novos. O contorno é rodar com
+> `--disable-gpu`:
+>
+> ```bash
+> snap run spotify --disable-gpu
+> ```
+>
+> Isso já é automático no plugin, mas vale saber caso você abrir o Spotify
+> na mão pelo menu de aplicativos.
+
+Depois disso e so falar:
+
+- "toca bohemian rhapsody"
+- "toca alguma coisa do Charlie Brown Jr"
+- "pausa o spotify", "proxima musica", "o que esta tocando"
+- "volume do spotify 40"
+
+O plugin prefere tocar **no computador**: se o Spotify não estiver aberto, ele
+sobe o aplicativo sozinho antes de dar play.
+
 ## Servico em segundo plano (systemd --user)
 
 Para o Jarvis rodar sempre, sem abrir terminal, instale-o como servico de usuario:
