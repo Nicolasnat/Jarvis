@@ -10,14 +10,16 @@ from datetime import datetime
 from pathlib import Path
 
 import ollama
-from ddgs import DDGS
+
+from comum import (
+    PASTA_TRABALHO, PASTA_DADOS, PASTA_CONFIG, BASE_PROJETO,
+    MODELO_ESPECIALISTA, resolver, esquema, TEXTO,
+    limpar_ansi, resumir_busca,
+)
+from ferramentas.carregador import carregar_plugins
 
 
 MODELO = "llama3.1:8b"
-MODELO_ESPECIALISTA = "qwen2.5:7b"
-
-PASTA_TRABALHO = Path.home() / "projetos"
-PASTA_TRABALHO.mkdir(parents=True, exist_ok=True)
 
 TEMPO_PADRAO = 120
 TEMPO_CODIGO = 900
@@ -85,33 +87,6 @@ CONFIRMACOES = [
 
 
 # ---------- AJUDANTES E FERRAMENTAS ----------
-
-def limpar_ansi(texto: str) -> str:
-    return re.sub(r"\x1b\[[0-9;?]*[a-zA-Z]|\x1b\][^\x07]*\x07", "", texto)
-
-
-REDUNDANTES = {"projetos", "projects", "projeto", "project"}
-
-
-def resolver(caminho: str) -> Path:
-    pasta = Path(str(caminho).strip().strip("\"'")).expanduser()
-
-    if not pasta.is_absolute():
-        partes = pasta.parts
-        if partes and partes[0].lower() in REDUNDANTES:
-            partes = partes[1:]
-        return PASTA_TRABALHO.joinpath(*partes) if partes else PASTA_TRABALHO
-
-    try:
-        relativo = pasta.relative_to(PASTA_TRABALHO)
-    except ValueError:
-        return pasta
-
-    partes = list(relativo.parts)
-    while partes and partes[0].lower() in REDUNDANTES:
-        partes.pop(0)
-    return PASTA_TRABALHO.joinpath(*partes) if partes else PASTA_TRABALHO
-
 
 def gerar_config_permissoes() -> dict:
     """Politica aplicada so ao OpenCode chamado pelo Jarvis (via OPENCODE_CONFIG)."""
@@ -349,79 +324,6 @@ def rodar(comando, tempo=TEMPO_PADRAO, pasta=None, mostrar=True, stdin_nulo=True
     return saida or f"'{comando[0]}' executado com sucesso."
 
 
-def resumir_busca(web: str, limite=1800) -> str:
-    if len(web) <= limite:
-        return web
-    return web[:limite] + "\n...[conteudo truncado]"
-
-
-def pesquisar_na_web(busca: str) -> str:
-    try:
-        resultados = list(DDGS().text(busca, max_results=5))
-        if not resultados:
-            return f"Nenhum resultado encontrado para '{busca}'."
-
-        conteudos = [
-            f"Titulo: {r.get('title')}\nResumo: {r.get('body')}\nLink: {r.get('href')}"
-            for r in resultados
-        ]
-        return resumir_busca("Informacoes encontradas na web:\n\n" + "\n\n".join(conteudos))
-    except Exception as erro:
-        return f"Erro ao realizar a busca na web: {erro}"
-
-
-def criar_pasta(caminho: str):
-    pasta = resolver(caminho)
-    if pasta.exists() and any(pasta.iterdir()):
-        return f"A pasta '{pasta}' ja existe e nao esta vazia."
-    pasta.mkdir(parents=True, exist_ok=True)
-    return f"Pasta criada em: {pasta}"
-
-
-def listar_projetos(caminho="."):
-    base = resolver(caminho)
-    if not base.is_dir():
-        return f"A pasta '{base}' nao existe."
-
-    linhas = [f"Projetos em {base}:"]
-    for item in sorted(base.iterdir()):
-        if not item.is_dir() or item.name.startswith("."):
-            continue
-        arquivos = [a for a in item.iterdir() if a.name != "node_modules"]
-        linhas.append(f"- {item.name} ({len(arquivos)} itens, modificado em {datetime.fromtimestamp(item.stat().st_mtime):%d/%m/%Y})")
-    return "\n".join(linhas) if len(linhas) > 1 else f"Nenhum projeto em {base}."
-
-
-def abrir_pasta(caminho: str):
-    pasta = resolver(caminho)
-    if not pasta.is_dir():
-        return f"A pasta '{pasta}' nao existe."
-    subprocess.Popen(["xdg-open", str(pasta)], stdout=subprocess.DEVNULL,
-                     stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL, start_new_session=True)
-    return f"Gerenciador de arquivos aberto em: {pasta}"
-
-
-def abrir_vscode(caminho: str = "."):
-    pasta = resolver(caminho)
-    if not pasta.exists():
-        pasta.mkdir(parents=True, exist_ok=True)
-    try:
-        subprocess.Popen(["code", str(pasta)], stdout=subprocess.DEVNULL,
-                         stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL, start_new_session=True)
-    except FileNotFoundError:
-        return "Falha: o VS Code (comando 'code') nao esta instalado."
-    return f"VS Code aberto em: {pasta}"
-
-
-def perguntar_qwen(pergunta: str):
-    """Especialista local para raciocinio, explicacoes e pesquisa de conhecimento."""
-    try:
-        r = ollama.chat(model=MODELO_ESPECIALISTA, messages=[{"role": "user", "content": pergunta}])
-        return r["message"]["content"]
-    except Exception as erro:
-        return f"Falha ao consultar o {MODELO_ESPECIALISTA}: {erro}"
-
-
 def inspecionar_projeto(caminho: str) -> str:
     pasta = resolver(caminho)
     if not pasta.exists():
@@ -538,12 +440,6 @@ def planejar_com_antigravity(pedido: str, pasta_destino: str = ".") -> str:
 
 # ---------- CATALOGO UNICO DE FERRAMENTAS ----------
 
-def esquema(propriedades, obrigatorias):
-    return {"type": "object", "properties": propriedades, "required": obrigatorias}
-
-
-TEXTO = {"type": "string"}
-
 CATALOGO = [
     {
         "nome": "pedir_ao_opencode",
@@ -558,43 +454,11 @@ CATALOGO = [
         }, ["tarefa"]),
         "fn": pedir_ao_opencode,
     },
-    {
-        "nome": "abrir_vscode",
-        "descricao": "Abre uma pasta no Visual Studio Code. Use DEPOIS que o OpenCode terminar de criar o projeto.",
-        "parametros": esquema({"caminho": {"type": "string", "description": "Pasta a abrir. Use '.' para a pasta raiz."}}, ["caminho"]),
-        "fn": abrir_vscode,
-    },
-    {
-        "nome": "criar_pasta",
-        "descricao": "Cria apenas um diretorio vazio. NAO use para criar projetos: isso e responsabilidade do pedir_ao_opencode.",
-        "parametros": esquema({"caminho": {"type": "string", "description": "Nome ou caminho da pasta"}}, ["caminho"]),
-        "fn": criar_pasta,
-    },
-    {
-        "nome": "listar_projetos",
-        "descricao": "Lista os projetos existentes na pasta de trabalho.",
-        "parametros": esquema({"caminho": TEXTO}, []),
-        "fn": listar_projetos,
-    },
-    {
-        "nome": "abrir_pasta",
-        "descricao": "Abre uma pasta no gerenciador de arquivos do sistema (Nautilus).",
-        "parametros": esquema({"caminho": {"type": "string", "description": "Pasta a abrir"}}, ["caminho"]),
-        "fn": abrir_pasta,
-    },
-    {
-        "nome": "pesquisar_na_web",
-        "descricao": "Pesquisa na web e retorna titulos, resumos e links.",
-        "parametros": esquema({"busca": {"type": "string", "description": "Termo de pesquisa"}}, ["busca"]),
-        "fn": pesquisar_na_web,
-    },
-    {
-        "nome": "perguntar_qwen",
-        "descricao": f"Consulta o modelo local {MODELO_ESPECIALISTA} para perguntas de conhecimento, raciocinio ou texto. NAO serve para criar arquivos.",
-        "parametros": esquema({"pergunta": {"type": "string", "description": "A pergunta a enviar ao especialista"}}, ["pergunta"]),
-        "fn": perguntar_qwen,
-    },
 ]
+
+# Plugins de ferramentas/ entram automaticamente no catalogo.
+_PLUGINS, _FUNCOES_PLUGINS, PLUGINS_INDISPONIVEIS = carregar_plugins()
+CATALOGO += _PLUGINS
 
 OPCIONAIS = [
     {
@@ -636,6 +500,7 @@ FERRAMENTAS = {t["nome"]: t["fn"] for t in CATALOGO}
 disponiveis = [t for t in OPCIONAIS if shutil.which(t["binario"])]
 FERRAMENTAS.update({t["nome"]: t["fn"] for t in disponiveis})
 CATALOGO = CATALOGO + disponiveis
+META = {t["nome"]: t for t in CATALOGO}
 
 MANUAL = [
     {"type": "function", "function": {"name": t["nome"], "description": t["descricao"], "parameters": t["parametros"]}}
@@ -791,7 +656,7 @@ ANTI-ALUCINACAO (obrigatoria):
 - Ao relatar, use apenas o que a ferramenta realmente retornou.
 
 Pasta de trabalho: {PASTA_TRABALHO}
-Ferramentas indisponiveis nesta maquina: {", ".join(t["nome"] for t in OPCIONAIS if t not in disponiveis) or "nenhuma"}"""
+Ferramentas indisponiveis nesta maquina: {", ".join([t["nome"] for t in OPCIONAIS if t not in disponiveis] + [nome for nome, _ in PLUGINS_INDISPONIVEIS]) or "nenhuma"}"""
 
 
 ALIAS_ARGUMENTOS = {
@@ -822,6 +687,23 @@ def normalizar_argumentos(funcao, argumentos: dict):
     return finais, descartados
 
 
+def _gate_seguranca(meta: dict, argumentos: dict):
+    """Aplica BLOQUEIOS/CREDENCIAIS/CONFIRMACOES as ferramentas marcadas como sensiveis."""
+    nivel = (meta or {}).get("seguranca")
+    if not nivel:
+        return None
+
+    alvo = " ".join(str(valor) for valor in (argumentos or {}).values())
+    bloqueados, a_confirmar = detectar_graves(alvo)
+    if bloqueados:
+        return "BLOQUEADO pelo Jarvis:\n" + "\n".join(f"- {c}" for c in bloqueados)
+    if a_confirmar and not confirmar_risco(a_confirmar):
+        return "CANCELADO pelo usuario. Nada foi executado."
+    if nivel == "sempre" and not confirmar_risco([f"{meta['nome']}: {alvo[:120]}"]):
+        return "CANCELADO pelo usuario. Nada foi executado."
+    return None
+
+
 def executar(nome: str, argumentos: dict) -> str:
     funcao = FERRAMENTAS.get(nome)
     if funcao is None:
@@ -841,6 +723,10 @@ def executar(nome: str, argumentos: dict) -> str:
     ]
     if faltando:
         return f"Falha: '{nome}' exige o parametro {', '.join(faltando)} e nao foi fornecido."
+
+    bloqueio = _gate_seguranca(META.get(nome), corrigidos)
+    if bloqueio:
+        return bloqueio
 
     try:
         return str(funcao(**corrigidos))
