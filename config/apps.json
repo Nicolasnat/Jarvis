@@ -1,10 +1,347 @@
 {
-  "vscode": ["code"],
-  "navegador": ["firefox"],
-  "firefox": ["firefox"],
-  "arquivos": ["nautilus"],
-  "terminal": ["gnome-terminal"],
-  "spotify": ["spotify"],
-  "visualizador_imagem": ["eog"],
-  "leitor_pdf": ["evince"]
+  "additional drivers": [
+    "/usr/bin/software-properties-gtk"
+  ],
+  "advanced network configuration": [
+    "nm-connection-editor"
+  ],
+  "analisador de disco": [
+    "baobab"
+  ],
+  "app center": [
+    "/snap/bin/snap-store"
+  ],
+  "arquivos": [
+    "nautilus"
+  ],
+  "atualizador": [
+    "/usr/bin/update-manager"
+  ],
+  "baobab": [
+    "baobab"
+  ],
+  "bloons td 6": [
+    "steam"
+  ],
+  "calculator": [
+    "gnome-calculator"
+  ],
+  "characters": [
+    "/usr/bin/gnome-characters"
+  ],
+  "chrome": [
+    "/usr/bin/flatpak",
+    "run",
+    "--branch=stable",
+    "--arch=x86_64",
+    "--command=/app/bin/chrome",
+    "--file-forwarding",
+    "com.google.Chrome"
+  ],
+  "clocks": [
+    "gnome-clocks"
+  ],
+  "code": [
+    "/snap/bin/code"
+  ],
+  "configuracoes": [
+    "gnome-control-center"
+  ],
+  "configuracoes da nvidia": [
+    "/usr/bin/nvidia-settings"
+  ],
+  "controle de volume": [
+    "pavucontrol"
+  ],
+  "datagrip": [
+    "/snap/bin/datagrip"
+  ],
+  "disk usage analyzer": [
+    "baobab"
+  ],
+  "disks": [
+    "gnome-disks"
+  ],
+  "docker desktop": [
+    "/opt/docker-desktop/bin/docker-desktop"
+  ],
+  "document viewer": [
+    "evince"
+  ],
+  "editor de conexao": [
+    "nm-connection-editor"
+  ],
+  "editor de texto": [
+    "gnome-text-editor"
+  ],
+  "eog": [
+    "eog"
+  ],
+  "evince": [
+    "evince"
+  ],
+  "explorador de arquivos": [
+    "nautilus"
+  ],
+  "extension manager": [
+    "extension-manager"
+  ],
+  "extensions": [
+    "/usr/bin/gnome-extensions-app"
+  ],
+  "files": [
+    "nautilus"
+  ],
+  "firefox": [
+    "/snap/bin/firefox"
+  ],
+  "firmware updater": [
+    "/snap/bin/firmware-updater"
+  ],
+  "flatpak": [
+    "/usr/bin/flatpak",
+    "run",
+    "--branch=stable",
+    "--arch=x86_64",
+    "--command=/app/bin/chrome",
+    "--file-forwarding",
+    "com.google.Chrome"
+  ],
+  "fonts": [
+    "gnome-font-viewer"
+  ],
+  "gerenciador de arquivos": [
+    "nautilus"
+  ],
+  "gerenciador de atualizacoes": [
+    "/usr/bin/update-manager"
+  ],
+  "gerenciador de rede": [
+    "nm-connection-editor"
+  ],
+  "gnome calculator": [
+    "gnome-calculator"
+  ],
+  "gnome characters": [
+    "/usr/bin/gnome-characters"
+  ],
+  "gnome clocks": [
+    "gnome-clocks"
+  ],
+  "gnome control center": [
+    "gnome-control-center"
+  ],
+  "gnome disks": [
+    "gnome-disks"
+  ],
+  "gnome extensions app": [
+    "/usr/bin/gnome-extensions-app"
+  ],
+  "gnome font viewer": [
+    "gnome-font-viewer"
+  ],
+  "gnome language selector": [
+    "/usr/bin/gnome-language-selector"
+  ],
+  "gnome logs": [
+    "gnome-logs"
+  ],
+  "gnome power statistics": [
+    "gnome-power-statistics"
+  ],
+  "gnome session properties": [
+    "gnome-session-properties"
+  ],
+  "gnome software": [
+    "gnome-software"
+  ],
+  "gnome system monitor": [
+    "gnome-system-monitor"
+  ],
+  "gnome terminal": [
+    "gnome-terminal"
+  ],
+  "gnome text editor": [
+    "gnome-text-editor"
+  ],
+  "gnome tweaks": [
+    "gnome-tweaks"
+  ],
+  "google chrome": [
+    "/usr/bin/flatpak",
+    "run",
+    "--branch=stable",
+    "--arch=x86_64",
+    "--command=/app/bin/chrome",
+    "--file-forwarding",
+    "com.google.Chrome"
+  ],
+  "help": [
+    "yelp"
+  ],
+  "ibus preferences": [
+    "ibus-setup"
+  ],
+  "ibus setup": [
+    "ibus-setup"
+  ],
+  "im config": [
+    "im-config"
+  ],
+  "image viewer": [
+    "eog"
+  ],
+  "info": [
+    "info"
+  ],
+  "input method": [
+    "im-config"
+  ],
+  "insomnia": [
+    "/opt/Insomnia/insomnia"
+  ],
+  "install steam": [
+    "/usr/games/steam"
+  ],
+  "language support": [
+    "/usr/bin/gnome-language-selector"
+  ],
+  "leitor de pdf": [
+    "evince"
+  ],
+  "logs": [
+    "gnome-logs"
+  ],
+  "loja": [
+    "gnome-software"
+  ],
+  "loja de apps": [
+    "/snap/bin/snap-store"
+  ],
+  "monitor de sistema": [
+    "gnome-system-monitor"
+  ],
+  "monitor do sistema": [
+    "gnome-system-monitor"
+  ],
+  "nautilus": [
+    "nautilus"
+  ],
+  "navegador": [
+    "firefox"
+  ],
+  "nm connection editor": [
+    "nm-connection-editor"
+  ],
+  "nvidia settings": [
+    "/usr/bin/nvidia-settings"
+  ],
+  "nvidia x server settings": [
+    "/usr/bin/nvidia-settings"
+  ],
+  "onlyoffice": [
+    "/snap/bin/onlyoffice-desktopeditors"
+  ],
+  "onlyoffice desktop editors": [
+    "/snap/bin/onlyoffice-desktopeditors"
+  ],
+  "onlyoffice desktopeditors": [
+    "/snap/bin/onlyoffice-desktopeditors"
+  ],
+  "opencode": [
+    "/snap/bin/opencode.desktop"
+  ],
+  "opencode desktop": [
+    "/snap/bin/opencode.desktop"
+  ],
+  "passwords and keys": [
+    "seahorse"
+  ],
+  "pavucontrol": [
+    "pavucontrol"
+  ],
+  "power statistics": [
+    "gnome-power-statistics"
+  ],
+  "pulseaudio volume control": [
+    "pavucontrol"
+  ],
+  "seahorse": [
+    "seahorse"
+  ],
+  "senhas e chaves": [
+    "seahorse"
+  ],
+  "settings": [
+    "gnome-control-center"
+  ],
+  "snap store": [
+    "/snap/bin/snap-store"
+  ],
+  "software": [
+    "gnome-software"
+  ],
+  "software properties gtk": [
+    "/usr/bin/software-properties-gtk"
+  ],
+  "software updater": [
+    "/usr/bin/update-manager"
+  ],
+  "software updates": [
+    "software-properties-gtk"
+  ],
+  "spotify": [
+    "/snap/bin/spotify"
+  ],
+  "startup applications": [
+    "gnome-session-properties"
+  ],
+  "steam": [
+    "/usr/games/steam"
+  ],
+  "suporte idiomas": [
+    "/usr/bin/gnome-language-selector"
+  ],
+  "system monitor": [
+    "gnome-system-monitor"
+  ],
+  "terminal": [
+    "gnome-terminal"
+  ],
+  "texinfo": [
+    "info"
+  ],
+  "text editor": [
+    "gnome-text-editor"
+  ],
+  "tweaks": [
+    "gnome-tweaks"
+  ],
+  "ubuntu software": [
+    "gnome-software"
+  ],
+  "update manager": [
+    "/usr/bin/update-manager"
+  ],
+  "visor de imagem": [
+    "eog"
+  ],
+  "visual studio code": [
+    "/snap/bin/code"
+  ],
+  "visualizador de imagem": [
+    "eog"
+  ],
+  "visualizador de pdf": [
+    "evince"
+  ],
+  "vscode": [
+    "/snap/bin/code"
+  ],
+  "xclicker": [
+    "xclicker"
+  ],
+  "yelp": [
+    "yelp"
+  ]
 }

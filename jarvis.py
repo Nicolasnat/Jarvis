@@ -15,7 +15,7 @@ import ollama
 from comum import (
     PASTA_TRABALHO, PASTA_DADOS, PASTA_CONFIG, BASE_PROJETO,
     MODELO_ESPECIALISTA, resolver, esquema, TEXTO,
-    limpar_ansi, resumir_busca, memoria_para_prompt,
+    limpar_ansi, resumir_busca, memoria_para_prompt, apps_para_prompt, chave_nome,
 )
 from ferramentas.carregador import carregar_plugins
 from ferramentas._agenda import iniciar as iniciar_agenda
@@ -742,8 +742,64 @@ def executar(nome: str, argumentos: dict) -> str:
         return f"Erro na execucao de '{nome}': {erro}"
 
 
+def _chave_chamada(nome: str, argumentos: dict) -> str:
+    """Identidade de uma chamada: mesma ferramenta + mesmos argumentos uteis.
+
+    Passa pela normalizacao de proposito, para 'spotify(tocar, musica=X,
+    dispositivo=celular)' e 'spotify(tocar, musica=X)' contarem como a mesma
+    coisa. Sem isso o modelo reincidia no mesmo pedido so mudando o aparelho.
+    """
+    funcao = FERRAMENTAS.get(nome)
+    if funcao is not None:
+        try:
+            argumentos, _ = normalizar_argumentos(funcao, argumentos)
+        except (TypeError, ValueError):
+            pass
+    return nome + "|" + json.dumps(argumentos, sort_keys=True, default=str)
+
+
+# Como encerrar a conversa por voz. Antes era comparacao exata, entao so
+# 'sair' funcionava: 'pode desligar' caia no modelo e ele ia tentar abrir um
+# programa chamado 'desligar'.
+PALAVRAS_ENCERRAR = {
+    "sair", "sai", "saindo", "encerrar", "encerra", "encerrado", "encerrando",
+    "desligar", "desliga", "desligado", "desligando", "tchau", "tchauzinho",
+    "falou", "ate", "logo", "conversa", "sessao", "dialogo", "papel",
+}
+
+# Palavras que podem aparecer ao redor do verbo de encerramento sem transformar
+# a frase em outro pedido. 'desligar o spotlight do jarvis' NAO pode encerrar:
+# 'spotlight' nao esta aqui, e e por isso que ele nao entra.
+CORTESIA_ENCERRAR = {
+    "pode", "poderia", "podes", "quero", "queria", "jarvis", "me", "a", "o",
+    "as", "os", "um", "uma", "de", "do", "da", "dos", "das", "por", "favor",
+    "vc", "voce", "e", "va", "bora", "ja", "agradece", "obrigado", "obrigada",
+    "entao", "ai", "aqui", "com", "no", "na", "ser", "ficar", "final",
+}
+
+
+def _quer_encerrar(texto: str) -> bool:
+    """Diz se a frase e so um 'tchau', e nao um pedido.
+
+    So encerra quando a frase e curta e feita so de verbo de encerramento e
+    palavras de cortesia. Qualquer palavra a mais (um programa, uma materia)
+    significa que a pessoa esta pedindo algo, nao se despedindo.
+    """
+    partes = chave_nome(texto or "").replace(",", " ").replace(".", " ").split()
+    if not partes or len(partes) > 5:
+        return False
+    if not any(p in PALAVRAS_ENCERRAR for p in partes):
+        return False
+    return all(p in PALAVRAS_ENCERRAR or p in CORTESIA_ENCERRAR for p in partes)
+
+
 def rodar_turno(conversa, texto: str):
     chamadas = set()
+    # Modelos pequenos repetem a mesma ferramenta no mesmo turno (o Spotify foi
+    # chamado duas vezes seguidas com a mesma musica, so mudando o aparelho).
+    # Cada repeticao custa um ida-e-volta ao Ollama, entao a segunda e as
+    # seguintes reaproveitam o resultado da primeira.
+    feitas = {}
     for _ in range(8):
         conversa = podar(conversa)
         r = ollama.chat(model=MODELO, messages=conversa, tools=MANUAL)
@@ -755,12 +811,16 @@ def rodar_turno(conversa, texto: str):
                 print(f"\nJarvis: {mensagem['content']}")
             break
 
-        for pedido in mensagem["tool_calls"]:
+        for pedido in mensagem.get("tool_calls"):
             nome = pedido["function"]["name"]
             argumentos = pedido["function"].get("arguments") or {}
             print(f"\n[jarvis] executando {nome}({argumentos})...", flush=True)
 
-            if nome == "pedir_ao_opencode" and "pedir_ao_opencode" in chamadas:
+            chave = _chave_chamada(nome, argumentos)
+            if chave in feitas:
+                resultado = feitas[chave]
+                print("   (duplicado ignorado)", flush=True)
+            elif nome == "pedir_ao_opencode" and "pedir_ao_opencode" in chamadas:
                 resultado = ("O OpenCode ja foi acionado neste turno. Use o resultado anterior "
                              "para responder, em vez de chamar a ferramenta de novo.")
                 print("   (duplicado ignorado)", flush=True)
@@ -771,6 +831,7 @@ def rodar_turno(conversa, texto: str):
                         chamadas.add("planejar_com_antigravity")
                 chamadas.add(nome)
                 resultado = executar(nome, argumentos)
+                feitas[chave] = resultado
 
             if resultado[:5] in {"FALHA", "Erro ", "BLOQ"}:
                 print(f"   x {resultado[:300]}", flush=True)
@@ -824,11 +885,21 @@ def rodar_modo_voz(conversa, servico=False):
 
     while True:
         try:
+            # Devolve a RAM dos modelos quando o usuario para de falar.
+            voz.limpar_ocios()
             print("Ouvindo 'Jarvis'...", flush=True)
             if not voz.escutar_wakeword():
                 continue
-            voz.falar("Pois nao?")
-            texto = voz.transcrever()
+            print("Wakeword detectada.", flush=True)
+            # Grava em paralelo com o 'Pois nao?'. Antes a gravacao so
+            # começava depois que o aviso terminava, e ainda levava 6s
+            # cravados mesmo numa frase curta.
+            arquivo, gravando = voz.comecar_a_gravar(
+                atencao_inicial=voz.TEMPO_AVISO,
+            )
+            voz.falar(voz.AVISO)
+            gravando.join(timeout=voz.DURACAO_FALA + 10)
+            texto = voz.transcrever_arquivo(arquivo)
         except KeyboardInterrupt:
             print("\nEncerrando voz.")
             break
@@ -839,15 +910,16 @@ def rodar_modo_voz(conversa, servico=False):
             continue
 
         if not texto:
+            print("[voz] Wakeword ok, mas nada foi transcrito.", flush=True)
             voz.falar("Nao entendi.")
             continue
 
         print(f"Voce: {texto}", flush=True)
-        if texto.lower() in {"sair", "encerrar", "desligar", "tchau", "ate logo"}:
+        if _quer_encerrar(texto):
             voz.falar("Ate logo.")
             break
 
-        conversa[0]["content"] = REGRAS + memoria_para_prompt()
+        conversa[0]["content"] = REGRAS + memoria_para_prompt() + apps_para_prompt()
         conversa.append({"role": "user", "content": texto})
         global ULTIMO_PEDIDO
         ULTIMO_PEDIDO = texto
@@ -866,11 +938,7 @@ def rodar_modo_voz(conversa, servico=False):
         voz.descarregar()
 
 
-def main():
-    aplicar_config_permissoes()
-    if AGY:
-        aplicar_regras_antigravity()
-        confiar_no_workspace()
+def _anunciar_status():
     try:
         ollama.chat(model=MODELO, messages=[{"role": "user", "content": "ping"}])
         arquiteto = f"Antigravity ({MODELO_ANTIGRAVITY})" if AGY else "indisponivel"
@@ -880,6 +948,18 @@ def main():
         print("Digite 'sair' para encerrar.\n")
     except Exception as erro:
         print(f"Nao consegui falar com o Ollama ({erro}). Ele esta rodando? Inicie com 'ollama serve'.\n")
+
+
+def main():
+    aplicar_config_permissoes()
+    if AGY:
+        aplicar_regras_antigravity()
+        confiar_no_workspace()
+
+    # Este ping carrega o modelo do Ollama e levava 1.2s. Rodando em segundo
+    # plano, o microfone abre ~1.2s antes sem perder o aquecimento: quando a
+    # pessoa falar, o modelo ja estara em RAM de qualquer jeito.
+    threading.Thread(target=_anunciar_status, daemon=True).start()
 
     conversa = [{"role": "system", "content": REGRAS}]
     modo_servico = "--servico" in sys.argv
@@ -918,7 +998,7 @@ def main():
             break
 
         # Injeta a memoria relevante no prompt do sistema antes de cada turno.
-        conversa[0]["content"] = REGRAS + memoria_para_prompt()
+        conversa[0]["content"] = REGRAS + memoria_para_prompt() + apps_para_prompt()
         conversa.append({"role": "user", "content": texto})
         global ULTIMO_PEDIDO
         ULTIMO_PEDIDO = texto
