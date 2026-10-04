@@ -134,7 +134,7 @@ class _Coletor(BaseHTTPRequestHandler):
             corpo = "<h1>Falha na autorizacao do Spotify.</h1><p>Feche esta aba.</p>"
             status = 400
         else:
-            corpo = "<h1>Jarvis conectado ao Spotify!</h1><p>Pode fechar esta aba.</p>"
+            corpo = "<h1>Nexus conectado ao Spotify!</h1><p>Pode fechar esta aba.</p>"
             status = 200
 
         self.send_response(status)
@@ -147,7 +147,7 @@ class _Coletor(BaseHTTPRequestHandler):
 
 
 def conectar():
-    """Abre o navegador para o usuario autorizar o Jarvis. Bloqueia ate o callback."""
+    """Abre o navegador para o usuario autorizar o Nexus. Bloqueia ate o callback."""
     identificador = client_id()
     if not identificador:
         raise ErroSpotify(
@@ -195,7 +195,7 @@ def token():
     if not salvos:
         raise ErroSpotify(
             "O Spotify ainda nao foi conectado. Rode spotify acao=conectar uma vez "
-            "para autorizar o Jarvis.",
+            "para autorizar o Nexus.",
             reconectar=True,
         )
 
@@ -427,7 +427,7 @@ def _escolher_dispositivo(lista, pedido=None):
     """Descobre em qual aparelho tocar.
 
     A API so aceita 'device_id' quando o aparelho esta aberto no momento. Como
-    o Jarvis roda no computador, ele prefere o PC: depois o que estiver ativo e,
+    o Nexus roda no computador, ele prefere o PC: depois o que estiver ativo e,
     por ultimo, o primeiro da lista.
     """
     if pedido:

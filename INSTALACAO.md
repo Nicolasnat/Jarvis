@@ -38,25 +38,82 @@ A voz natural em portugues do Brasil usa o Piper (`piper-tts`, instalado pelo
 ./venv/bin/python -m piper.download_voices pt_BR-faber-medium --download-dir dados/voz
 ```
 
-Sem esse modelo, o Jarvis cai automaticamente para espeak-ng/spd-say (mais robotico).
+Sem esse modelo, o Nexus cai automaticamente para espeak-ng/spd-say (mais robotico).
 
 ## Microfone (importante)
 
-O `openwakeword` so reconhece a wakeword se o audio chegar em um nivel
-sane. Em notebooks com DMIC (controlado pelo `sofhdadsp`) o ganho vem de
+### A wakeword e "Nexus", "Hey Nexus" ou "Nexus iniciar"
+
+O reconhecimento e por palavras-chave, feito pelo Vosk (`vosk`, no
+`requirements.txt`) — nao ha mais um modelo acustico de frase fixa. As frases
+aceitas ficam em `config/voz.json` (`wake_frases`); por padrao: `nexus`, `nexo`,
+`nexus iniciar`, `oi nexus` e `hey nexus`. Basta dizer "Nexus" para acordar.
+
+O modelo do Vosk nao vem no repositorio; baixe uma unica vez:
+
+```bash
+mkdir -p dados/vosk && cd dados/vosk
+curl -LO https://alphacephei.com/vosk/models/vosk-model-small-pt-0.3.zip
+unzip vosk-model-small-pt-0.3.zip && rm vosk-model-small-pt-0.3.zip
+```
+
+Sem esse modelo, o modo voz fica indisponivel (o erro aponta o caminho esperado).
+
+### Ganho
+
+O reconhecimento (Vosk no wakeword e Whisper na transcricao) so funciona bem se o audio chegar em um nivel
+sane. Em notebooks com DMIC (controlado pelo `sof-hda-dsp`) o ganho vem de
 fabrica no maximo e o sinal **estoura**; com audio estourado nem a wakeword
 nem o Whisper funcionam. O servico ja corrige isso sozinho ao iniciar
 (`ExecStartPre`), mas voce pode conferir ou ajustar na mao:
 
 ```bash
 ./ajustar_microfone.sh              # ajusta Dmic0 e Capture
-./ajustar_microfone.sh 21 35         # ou informe os niveis (0-63 / 0-70)
+./ajustar_microfone.sh 35 42         # ou informe os niveis (0-63 / 0-70)
 ```
+
+### Calibrando o limiar
+
+`config/voz.json` guarda os ajustes do microfone, sem precisar editar codigo:
+
+```json
+{
+  "wake_frases": ["nexus", "nexo", "nexus iniciar", "oi nexus", "hey nexus"],
+  "wake_confirmacao": 2,
+  "wake_debug": false,
+  "barge_limiar": 0.010,
+  "barge_limiar_falando": 0.035,
+  "barge_duracao": 0.45
+}
+```
+
+Com `"wake_debug": true` o servico volta a logar a cada 10s o nivel do som e o
+que o Vosk ouviu (`ouvido: ...`). Acrescente ou tire frases de `wake_frases`
+conforme quiser; `wake_confirmacao` e quantos blocos de 100 ms a palavra deve
+persistir para valer (evita acordar com um ruido isolado). Deixe `wake_debug` em
+`false` depois: enche o journal.
+
+### Interrompendo o que o Nexus esta fazendo
+
+Enquanto o Nexus responde, toca uma musica, ou tem um agente de codigo
+trabalhando, o microfone fica aberto e qualquer frase sua cancela a acao: basta
+um "para" com meio segundo de fala. Durante a
+propria fala do Nexus o limiar e mais alto (`barge_limiar_falando`), senao a
+caixa de som devolve a voz dele no microfone e ele se cala sozinho.
 
 Para testar a deteccao sem o servico no meio:
 
 ```bash
-./venv/bin/python jarvis.py --voz
+./venv/bin/python nexus.py --voz
+```
+
+Se ele responder "Nao entendi" logo apos ativar a wakeword, o problema nao e
+a wakeword: e o Whisper. Se nao responder a voz nenhuma, confira os logs.
+
+Para testar a deteccao sem o servico no meio:
+
+```bash
+./venv/bin/python nexus.py --voz
 ```
 
 Se ele responder "Nao entendi" logo apos ativar a wakeword, o problema nao e
@@ -83,14 +140,14 @@ Depois cole o Client ID em `config/spotify.json`:
 { "client_id": "SEU_CLIENT_ID" }
 ```
 
-E autorize uma vez (abre o navegador e mostra um "Jarvis conectado"):
+E autorize uma vez (abre o navegador e mostra um "Nexus conectado"):
 
 ```bash
 ./venv/bin/python -c "from ferramentas import spotify; print(spotify.funcao('conectar'))"
 ```
 
 O plugin escolhe onde tocar: **prefere o computador**. Se o Spotify não
-estiver aberto, o próprio Jarvis sobe o aplicativo antes de dar play.
+estiver aberto, o próprio Nexus sobe o aplicativo antes de dar play.
 
 > **Se o Spotify do PC não abre** (some e volta na hora, sem mensagem): o snap
 > morre na inicialização da GPU com drivers novos. O contorno é rodar com
@@ -115,7 +172,7 @@ sobe o aplicativo sozinho antes de dar play.
 
 ## Servico em segundo plano (systemd --user)
 
-Para o Jarvis rodar sempre, sem abrir terminal, instale-o como servico de usuario:
+Para o Nexus rodar sempre, sem abrir terminal, instale-o como servico de usuario:
 
 ```bash
 ./instalar_servico.sh
@@ -124,10 +181,10 @@ Para o Jarvis rodar sempre, sem abrir terminal, instale-o como servico de usuari
 Ele inicia sozinho no login e fica ouvindo a wakeword. Comandos uteis:
 
 ```bash
-systemctl --user status jarvis
-journalctl --user -u jarvis -f
-systemctl --user stop jarvis
-systemctl --user disable --now jarvis
+systemctl --user status nexus
+journalctl --user -u nexus -f
+systemctl --user stop nexus
+systemctl --user disable --now nexus
 ```
 
 Para iniciar tambem sem login (apos ligar o notebook), rode uma vez:

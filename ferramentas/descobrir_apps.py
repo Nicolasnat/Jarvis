@@ -18,9 +18,9 @@ from comum import ARQUIVO_APPS, PASTA_DADOS, chave_nome, ler_json, salvar_json, 
 NOME = "descobrir_apps"
 DESCRICAO = (
     "Escaneia os aplicativos instalados no sistema e registra na lista permitida "
-    "(config/apps.json), para o Jarvis conseguir abrir qualquer programa do usuario. "
+    "(config/apps.json), para o Nexus conseguir abrir qualquer programa do usuario. "
     "Use quando o usuario pedir para ler/descobrir os aplicativos dele, ou quiser que "
-    "o Jarvis reconheca um programa novo."
+    "o Nexus reconheca um programa novo."
 )
 PARAMETROS = esquema(
     {"aplicar": {"type": "boolean", "description": "true grava a lista; false so mostra o que foi encontrado"}},

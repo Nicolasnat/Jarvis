@@ -11,7 +11,7 @@ OBRIGATORIOS = ("NOME", "DESCRICAO", "PARAMETROS", "funcao")
 def carregar_plugins():
     """Retorna (catalogo, funcoes, indisponiveis).
 
-    - catalogo: lista de dicts no formato usado pelo Jarvis.
+    - catalogo: lista de dicts no formato usado pelo Nexus.
     - funcoes: dicionario nome -> funcao.
     - indisponiveis: lista de (nome, motivo) para avisar o usuario.
     """

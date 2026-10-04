@@ -1,4 +1,4 @@
-"""Pacote de plugins do Jarvis.
+"""Pacote de plugins do Nexus.
 
 Cada modulo em ferramentas/ exporta NOME, DESCRICAO, PARAMETROS, funcao e,
 opcionalmente, BINARIO e SEGURANCA. O carregador monta o CATALOGO.
