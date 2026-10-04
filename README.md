@@ -18,6 +18,7 @@ Assistente de IA **local** em português do Brasil, que roda no terminal e **del
 - 🖥️ **Controla o sistema**: status de CPU/RAM/disco, abre e fecha programas, volume, brilho e área de transferência
 - 🎙️ **Modo voz** (`--voz`): escuta a wakeword "Nexus" ou "Hey Nexus" (ver nota abaixo), transcreve e responde falando (100% offline, voz neural Piper pt-BR)
 - 🛎️ **Serviço em segundo plano** (`--servico`): roda sozinho no login, sem terminal; modelos pesados são descarregados quando ociosos
+- 🪟 **Interface gráfica** (`--interface`): janela com orbe que pulsa com a sua voz, popups por ferramenta e confirmação de segurança por botões (PySide6/Qt)
 - 📚 **RAG local**: indexe documentos (txt, md, pdf, docx) e faça perguntas com base neles
 - 📂 **Organiza arquivos**: lista projetos, cria pastas, abre o VS Code e o gerenciador de arquivos
 - ✅ **Verifica o disco**: depois de cada tarefa de código, confere se o projeto foi realmente criado (e não confia só na resposta da IA)
@@ -156,6 +157,28 @@ Você **digita** (mais preciso que a transcrição de voz) e o Nexus **responde 
 voz** pelo Piper — bom com fones de ouvido ou quando o teclado está longe do
 microfone. `--texto-voz` é um apelido para o mesmo modo.
 
+### Janela gráfica (interface de desktop)
+
+```bash
+./venv/bin/python nexus.py --interface
+```
+
+Abre uma janela escura com um **orbe** no centro que pulsa conforme o Nexus fala
+ou escuta, uma barra de comando no rodapé e o estado atual (ocioso, ouvindo,
+pensando, falando, executando). O modo liga voz e texto juntos: você pode falar
+a wakeword ou digitar. Dizer a wakeword **traz a janela para a frente**.
+
+Ao executar uma ferramenta, abre um **popup** com o resultado real dela (busca
+na web com as fontes, status do sistema com barras, volume/brilho, Spotify,
+tarefas, lembretes, projetos etc.). Cada popup tem **Exportar Telemetria**, que
+salva um `.md` em `dados/`. Operações sensíveis mostram um popup de
+**Confirmação de Segurança** com **AUTORIZAR**/**CANCELAR**, em vez do "digite
+sim" do terminal.
+
+Só uma instância da interface roda por vez (trava em `dados/nexus_interface.lock`).
+Se não houver servidor gráfico (X11/Wayland) ou o PySide6 não estiver instalado,
+o Nexus avisa e **continua no terminal**.
+
 ### Rodando em segundo plano (sem terminal)
 
 Para o Nexus ficar sempre disponível (é só dizer "Nexus"), instale-o como
@@ -175,8 +198,10 @@ systemctl --user start nexus      # iniciar de novo
 systemctl --user disable --now nexus   # remover do login
 ```
 
-> O serviço roda **só no modo voz**: não há terminal para digitar. Para usar o
-> modo texto, pare o serviço (`systemctl --user stop nexus`) e rode
+> O serviço inicia a **interface gráfica** (`--interface --servico`): a janela
+> aparece e a wakeword a traz para a frente; você fala ou digita nela. Se não
+> houver servidor gráfico, ele cai para o modo voz em segundo plano. Para usar o
+> terminal puro, pare o serviço (`systemctl --user stop nexus`) e rode
 > `./venv/bin/python nexus.py`. Em segundo plano, para ver o que ele ouviu e
 > respondeu, acompanhe o `journalctl` acima.
 
@@ -260,6 +285,11 @@ Nexus/
 ├── nexus.py                  # Aplicação principal (loop, intenção, segurança, pipeline)
 ├── comum.py                   # Helpers compartilhados (caminhos, JSON, memória no prompt)
 ├── voz.py                     # Wakeword, transcrição e fala (usado com --voz)
+├── interface/                 # Interface gráfica (PySide6/Qt)
+│   ├── app.py                 # Inicia o Qt, a janela e a instância única
+│   ├── janela_principal.py    # Janela, orbe e barra de comando
+│   ├── ponte.py               # Sinais Qt entre o núcleo e a interface
+│   └── popups/                # Popups por ferramenta (resultado real)
 ├── nexus.service             # Modelo do serviço systemd (usado pelo instalador)
 ├── instalar_servico.sh        # Instala/ativa o Nexus como serviço de usuário
 ├── ferramentas/

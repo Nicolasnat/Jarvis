@@ -171,6 +171,22 @@ Depois disso e so falar:
 O plugin prefere tocar **no computador**: se o Spotify não estiver aberto, ele
 sobe o aplicativo sozinho antes de dar play.
 
+## Interface grafica (opcional)
+
+A interface de desktop usa o **PySide6** (Qt), ja incluido no
+`requirements.txt`. Em geral o proprio Qt traz as bibliotecas que precisa; se a
+janela nao abrir, instale as dependencias de sistema do Qt (ex.:
+`sudo apt install libxcb-cursor0 libxkbcommon-x11-0`).
+
+Rode com:
+
+```bash
+./venv/bin/python nexus.py --interface
+```
+
+A voz e o texto ficam ativos juntos. Se nao houver servidor grafico
+(X11/Wayland) ou o PySide6 faltar, o Nexus avisa e continua no terminal.
+
 ## Servico em segundo plano (systemd --user)
 
 Para o Nexus rodar sempre, sem abrir terminal, instale-o como servico de usuario:
@@ -179,7 +195,9 @@ Para o Nexus rodar sempre, sem abrir terminal, instale-o como servico de usuario
 ./instalar_servico.sh
 ```
 
-Ele inicia sozinho no login e fica ouvindo a wakeword. Comandos uteis:
+Ele inicia sozinho no login com a interface grafica (`--interface --servico`) e
+fica ouvindo a wakeword; dizer "Nexus" traz a janela para a frente. Sem servidor
+grafico, cai para o modo voz em segundo plano. Comandos uteis:
 
 ```bash
 systemctl --user status nexus

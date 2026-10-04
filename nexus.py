@@ -59,6 +59,27 @@ ULTIMO_PEDIDO = ""
 # False e o Nexus continua se comportando como antes (Ctrl+C no terminal).
 _voz = None
 
+# Ponte com a interface grafica (PySide6). Inicia None e so e configurada
+# quando a flag --interface for usada com ambiente grafico disponivel.
+_ponte = None
+
+
+def _ponte_emitir(nome_sinal: str, *args):
+    """Emite um sinal da ponte Qt se a interface grafica estiver ativa."""
+    if _ponte is None:
+        return
+    try:
+        sinal = getattr(_ponte, nome_sinal, None)
+        if sinal is not None and hasattr(sinal, "emit"):
+            sinal.emit(*args)
+    except Exception:
+        pass
+
+
+def _definir_estado(estado: str):
+    """Atualiza o estado visual na interface grafica."""
+    _ponte_emitir("estado_mudou", estado)
+
 CHROME_OPENCODE = re.compile(r"^>\s*(build|plan|general)\s*[·|]")
 
 CAMINHOS_PROIBIDOS = [
@@ -272,6 +293,12 @@ def detectar_graves(texto: str) -> tuple:
 
 
 def confirmar_risco(comandos) -> bool:
+    comandos = [str(c) for c in comandos]
+    if _ponte is not None:
+        try:
+            return bool(_ponte.pedir_confirmacao_bloqueante(comandos))
+        except Exception:
+            pass
     print("\n[nexus] ATENCAO: a tarefa envolve operacoes sensiveis:")
     for comando in comandos:
         print(f"    ! {comando[:160]}")
@@ -884,14 +911,24 @@ def _gate_seguranca(meta: dict, argumentos: dict):
 
 
 def executar(nome: str, argumentos: dict) -> str:
+    if _ponte:
+        _ponte_emitir("ferramenta_iniciada", nome, argumentos or {})
+        _definir_estado("executando")
+
     funcao = FERRAMENTAS.get(nome)
     if funcao is None:
-        return f"Falha: a ferramenta '{nome}' nao existe."
+        resultado = f"Falha: a ferramenta '{nome}' nao existe."
+        if _ponte:
+            _ponte_emitir("ferramenta_concluida", nome, resultado)
+        return resultado
 
     try:
         corrigidos, descartados = normalizar_argumentos(funcao, argumentos or {})
     except (TypeError, ValueError) as erro:
-        return f"Falha ao interpretar os argumentos de '{nome}': {erro}"
+        resultado = f"Falha ao interpretar os argumentos de '{nome}': {erro}"
+        if _ponte:
+            _ponte_emitir("ferramenta_concluida", nome, resultado)
+        return resultado
 
     if descartados:
         print(f"   (aviso: argumento(s) ignorado(s) em {nome}: {', '.join(descartados)})", flush=True)
@@ -901,18 +938,27 @@ def executar(nome: str, argumentos: dict) -> str:
         if p.default is p.empty and nome not in corrigidos
     ]
     if faltando:
-        return f"Falha: '{nome}' exige o parametro {', '.join(faltando)} e nao foi fornecido."
+        resultado = f"Falha: '{nome}' exige o parametro {', '.join(faltando)} e nao foi fornecido."
+        if _ponte:
+            _ponte_emitir("ferramenta_concluida", nome, resultado)
+        return resultado
 
     bloqueio = _gate_seguranca(META.get(nome), corrigidos)
     if bloqueio:
+        if _ponte:
+            _ponte_emitir("ferramenta_concluida", nome, bloqueio)
         return bloqueio
 
     try:
-        return str(funcao(**corrigidos))
+        resultado = str(funcao(**corrigidos))
     except TypeError as erro:
-        return f"Falha nos argumentos de '{nome}': {erro}"
+        resultado = f"Falha nos argumentos de '{nome}': {erro}"
     except Exception as erro:
-        return f"Erro na execucao de '{nome}': {erro}"
+        resultado = f"Erro na execucao de '{nome}': {erro}"
+
+    if _ponte:
+        _ponte_emitir("ferramenta_concluida", nome, resultado)
+    return resultado
 
 
 def _chave_chamada(nome: str, argumentos: dict) -> str:
@@ -1191,6 +1237,7 @@ def rodar_turno(conversa, texto: str):
             print("[nexus] Interrompido antes do proximo passo.", flush=True)
             break
         conversa = podar(conversa)
+        _definir_estado("pensando")
         mensagem = _chamar_modelo(conversa)
         conversa.append(mensagem)
 
@@ -1443,10 +1490,13 @@ def rodar_modo_voz(conversa, servico=False):
         try:
             # Devolve a RAM dos modelos quando o usuario para de falar.
             voz.limpar_ocios()
+            _definir_estado("ocioso")
             print(f"Ouvindo '{voz.WAKEWORD}'...", flush=True)
             if not voz.escutar_wakeword():
                 continue
             print("Wakeword detectada.", flush=True)
+            _ponte_emitir("wakeword")
+            _definir_estado("ouvindo")
             # Grava em paralelo com a saudacao, mas so passa a valer quando
             # 'fim_aviso' e marcado (assim que a saudacao termina de tocar).
             # Janela fixa nao serve: aviso curto cortava o inicio do comando e
@@ -1473,23 +1523,31 @@ def rodar_modo_voz(conversa, servico=False):
 
         if not texto:
             print("[voz] Wakeword ok, mas nada foi transcrito.", flush=True)
+            _definir_estado("falando")
             voz.falar("Nao entendi.")
+            _definir_estado("ocioso")
             continue
 
         print(f"Voce: {texto}", flush=True)
         if _quer_encerrar(texto):
+            _definir_estado("falando")
             voz.falar("Ate logo.")
+            _definir_estado("ocioso")
             break
         if _quer_parar(texto):
             # Nada comecou ainda, mas o pedido e claro e nao vale gastar um
             # turno do modelo para descobrir que o usuario so queria parar.
             print("[voz] Nada a interromper.", flush=True)
+            _definir_estado("falando")
             voz.falar("Certo, parei.")
+            _definir_estado("ocioso")
             continue
         confirmacao = _e_confirmacao(texto)
         if confirmacao:
             print(f"\nNexus: {confirmacao}", flush=True)
+            _definir_estado("falando")
             voz.falar(confirmacao)
+            _definir_estado("ocioso")
             continue
 
         conversa[0]["content"] = REGRAS + memoria_para_prompt()
@@ -1508,12 +1566,15 @@ def rodar_modo_voz(conversa, servico=False):
         except Exception as erro:
             print(f"\nErro no turno: {erro}")
             _fechar_vigia()
+            _definir_estado("falando")
             voz.falar("Deu erro ao processar.")
+            _definir_estado("ocioso")
             continue
         _fechar_vigia()
 
         if _interrompido():
             print("[voz] Interrompido. Voltando a ouvir a wakeword.", flush=True)
+            _definir_estado("ocioso")
             continue
 
         resposta = resposta_falada(extrair_resposta(conversa))
@@ -1525,10 +1586,13 @@ def rodar_modo_voz(conversa, servico=False):
         print(f"\nNexus: {resposta}")
         # falar() abre a propria escuta com o limiar alto e se cala no
         # instante em que voce falar por cima.
+        _definir_estado("falando")
+        _ponte_emitir("resposta_final", resposta)
         voz.falar(resposta)
         if voz.interrompido():
             print("[voz] Fala interrompida.", flush=True)
         voz.descarregar()
+        _definir_estado("ocioso")
 
 
 def _anunciar_status():
@@ -1549,11 +1613,14 @@ def conduzir_texto(conversa, texto):
     conversa[0]["content"] = REGRAS + memoria_para_prompt()
     conversa.append({"role": "user", "content": texto})
     ULTIMO_PEDIDO = texto
+    _definir_estado("pensando")
     conversa, chamadas, resultados_turno = rodar_turno(conversa, texto)
     garantir_opencode(conversa, texto, chamadas)
     resposta = resposta_falada(extrair_resposta(conversa))
     if not resposta:
         resposta = resposta_falada("\n".join(resultados_turno))
+    _ponte_emitir("resposta_final", resposta)
+    _definir_estado("ocioso")
     return conversa, resposta
 
 
@@ -1605,6 +1672,17 @@ def rodar_modo_escrita(conversa):
 
 
 def main():
+    if "--help" in sys.argv or "-h" in sys.argv:
+        print("Uso: python nexus.py [opcoes]")
+        print("Opcoes:")
+        print("  --interface       Inicia com interface grafica de desktop (PySide6)")
+        print("  --voz             Inicia no modo de conversacao por voz")
+        print("  --servico         Roda em segundo plano como servico de voz")
+        print("  --escrever        Entrada por texto e resposta em voz")
+        print("  --texto-voz       Apelido para --escrever")
+        print("  --help, -h        Mostra esta ajuda")
+        return 0
+
     aplicar_config_permissoes()
     if AGY:
         aplicar_regras_antigravity()
@@ -1619,6 +1697,85 @@ def main():
     modo_servico = "--servico" in sys.argv
     modo_voz = "--voz" in sys.argv or modo_servico
     modo_escrita = "--escrever" in sys.argv or "--texto-voz" in sys.argv
+    modo_interface = "--interface" in sys.argv
+
+    ctrl_interface = None
+    if modo_interface:
+        try:
+            from interface.app import (
+                JaEmExecucao,
+                disponivel as interface_disponivel,
+                iniciar_interface,
+            )
+            from interface.ponte import Ponte
+
+            if not interface_disponivel():
+                print(
+                    "[nexus] Interface grafica indisponivel (sem display ou PySide6 ausente). Continuando no terminal.",
+                    flush=True,
+                )
+            else:
+                global _ponte
+                _ponte = Ponte()
+                ctrl_interface = iniciar_interface(ponte=_ponte)
+                # Modo interface habilita voz + texto + janela
+                modo_voz = True
+        except JaEmExecucao:
+            print(
+                "[nexus] Ja existe uma instancia com interface em execucao. Encerrando.",
+                flush=True,
+            )
+            return 0
+        except Exception as erro:
+            print(
+                f"[nexus] Nao foi possivel iniciar a interface grafica: {erro}. Continuando no terminal.",
+                flush=True,
+            )
+            _ponte = None
+            ctrl_interface = None
+
+    if ctrl_interface is not None:
+        def _tratar_comando_ui(texto_comando):
+            def _worker():
+                try:
+                    _conversa, resposta = conduzir_texto(conversa, texto_comando)
+                    print(f"\nNexus: {resposta}", flush=True)
+                    if modo_voz and _voz is not None and _voz.disponivel():
+                        _definir_estado("falando")
+                        _voz.falar(resposta)
+                        _voz.descarregar()
+                    _definir_estado("ocioso")
+                except Exception as err:
+                    print(f"\nErro no comando da interface: {err}", flush=True)
+                    _definir_estado("ocioso")
+
+            threading.Thread(target=_worker, daemon=True).start()
+
+        _ponte.comando_digitado.connect(_tratar_comando_ui)
+
+        if modo_voz:
+            import voz
+            voz.ao_nivel(lambda n: _ponte_emitir("fala_nivel", n))
+            if voz.disponivel():
+                iniciar_agenda(voz.falar)
+                thread_voz = threading.Thread(
+                    target=rodar_modo_voz,
+                    args=(conversa, modo_servico),
+                    daemon=True,
+                )
+                thread_voz.start()
+            else:
+                print(voz.mensagem_indisponivel())
+                iniciar_agenda()
+        else:
+            iniciar_agenda()
+
+        try:
+            codigo = ctrl_interface.executar()
+        except KeyboardInterrupt:
+            codigo = 0
+        print("\nNexus desligado.")
+        return codigo
 
     if modo_escrita:
         try:

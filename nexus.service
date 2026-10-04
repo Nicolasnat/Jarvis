@@ -8,7 +8,7 @@ Type=simple
 WorkingDirectory=@PROJETO@
 ExecStartPre=/bin/sh -c 'until curl -sf http://127.0.0.1:11434 >/dev/null; do sleep 2; done'
 ExecStartPre=@PROJETO@/ajustar_microfone.sh
-ExecStart=@PROJETO@/venv/bin/python @PROJETO@/nexus.py --servico
+ExecStart=@PROJETO@/venv/bin/python @PROJETO@/nexus.py --interface --servico
 Restart=on-failure
 RestartSec=5
 # Prioridade mais baixa: em segundo plano nao atrapalha o uso normal.
