@@ -206,6 +206,16 @@ systemctl --user stop nexus
 systemctl --user disable --now nexus
 ```
 
+O servico e instalado em `graphical-session.target` e copia `DISPLAY`,
+`XAUTHORITY` e o resto do ambiente grafico do gerenciador systemd antes de
+subir (`dados/nexus-env.conf`). Servicos `systemd --user` nao herdam essas
+variaveis sozinhos; sem elas a interface nao abre e o Nexus so responde no
+terminal. Se a janela nao vier depois de mudancas no unit, confira:
+
+```bash
+systemctl --user show-environment | grep -E "DISPLAY|XAUTHORITY"
+```
+
 Para iniciar tambem sem login (apos ligar o notebook), rode uma vez:
 
 ```bash
