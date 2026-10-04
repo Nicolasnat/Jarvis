@@ -13,6 +13,7 @@ import contextlib
 import ctypes
 import gc
 import math
+import os
 import re
 import shutil
 import subprocess
@@ -583,6 +584,29 @@ def _e_wake(texto: str) -> bool:
     return any(p in PALAVRAS_WAKE for p in palavras)
 
 
+@contextlib.contextmanager
+def _sem_ruido():
+    """Silencia o stderr do Kaldi durante uma chamada.
+
+    O Vosk avisa a cada reconhecedor criado que 'hey' nao esta no vocabulario
+    do modelo pt-BR. O aviso e inofensivo ('Hey Nexus' funciona pelo 'nexus'),
+    mas enfileirava uma linha de WARNING no journal a cada escuta.
+    """
+    try:
+        salvo = os.dup(2)
+    except OSError:
+        yield
+        return
+    nulo = os.open(os.devnull, os.O_WRONLY)
+    try:
+        os.dup2(nulo, 2)
+        yield
+    finally:
+        os.dup2(salvo, 2)
+        os.close(nulo)
+        os.close(salvo)
+
+
 def _novo_reconhecedor():
     """Cria um KaldiRecognizer novo a cada escuta.
 
@@ -592,7 +616,8 @@ def _novo_reconhecedor():
     import json
     import vosk
 
-    return vosk.KaldiRecognizer(_carregar_vosk(), TAXA, json.dumps(FRASES_WAKE + ["[unk]"]))
+    with _sem_ruido():
+        return vosk.KaldiRecognizer(_carregar_vosk(), TAXA, json.dumps(FRASES_WAKE + ["[unk]"]))
 
 
 def escutar_wakeword(parar=None) -> bool:

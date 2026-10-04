@@ -827,6 +827,11 @@ ANTI-ALUCINACAO (obrigatoria):
 - Se a ferramenta retornou erro, aviso ou bloqueio, relate o erro. Nunca diga que deu certo.
 - Ao relatar, use apenas o que a ferramenta realmente retornou.
 
+FORMATO DA RESPOSTA (obrigatorio):
+- Fale em portugues do Brasil, natural e curto (1 ou 2 frases).
+- NUNCA responda em JSON nem com estruturas de chaves. Nunca cite codigos HTTP (404, 403) nem nomes de campos tecnicos.
+- Se a ferramenta falhar, explique em linguagem simples o que houve e o que fazer.
+
 Pasta de trabalho: {PASTA_TRABALHO}
 Ferramentas indisponiveis nesta maquina: {", ".join([t["nome"] for t in OPCIONAIS if t not in disponiveis] + [nome for nome, _ in PLUGINS_INDISPONIVEIS]) or "nenhuma"}"""
 
@@ -994,8 +999,7 @@ def rodar_turno(conversa, texto: str):
         conversa.append(mensagem)
 
         if not mensagem.get("tool_calls"):
-            if mensagem.get("content"):
-                print(f"\nNexus: {mensagem['content']}")
+            # A resposta final e impressa (e falada) por quem chamou.
             break
 
         for pedido in mensagem.get("tool_calls"):
@@ -1056,7 +1060,7 @@ def garantir_opencode(conversa, texto: str, chamadas: set) -> set:
 
     r = ollama.chat(model=MODELO, messages=podar(conversa))
     if r["message"].get("content"):
-        print(f"\nNexus: {r['message']['content']}")
+        conversa.append(r["message"])
     return chamadas | {"pedir_ao_opencode"}
 
 
@@ -1065,6 +1069,31 @@ def extrair_resposta(conversa) -> str:
         if mensagem.get("role") == "assistant" and mensagem.get("content"):
             return mensagem["content"]
     return ""
+
+
+def resposta_falada(texto: str) -> str:
+    """Limpa a resposta antes de falar.
+
+    O modelo pequeno as vezes devolve um JSON de status em vez de uma frase
+    ('{"name": "status", "message": "..."}'). Isso nao pode ir para o
+    alto-falante: aqui extraimos o texto util e, na falta dele, devolvemos algo
+    curto e natural.
+    """
+    limpo = (texto or "").strip()
+    if limpo[:1] in ("{", "["):
+        try:
+            dados = json.loads(limpo)
+        except Exception:
+            dados = None
+        if isinstance(dados, dict):
+            for chave in ("message", "mensagem", "texto", "resposta", "content", "resultado"):
+                valor = dados.get(chave)
+                if isinstance(valor, str) and valor.strip():
+                    return resposta_falada(valor)
+            return "Feito."
+        if isinstance(dados, list):
+            return "Feito."
+    return limpo.strip("`").strip() or "Feito."
 
 
 def _quer_parar(texto: str) -> bool:
@@ -1245,7 +1274,7 @@ def rodar_modo_voz(conversa, servico=False):
             print("[voz] Interrompido. Voltando a ouvir a wakeword.", flush=True)
             continue
 
-        resposta = extrair_resposta(conversa)
+        resposta = resposta_falada(extrair_resposta(conversa))
         if resposta:
             print(f"\nNexus: {resposta}")
             # falar() abre a propria escuta com o limiar alto e se cala no
@@ -1323,6 +1352,9 @@ def main():
         try:
             conversa, chamadas = rodar_turno(conversa, texto)
             garantir_opencode(conversa, texto, chamadas)
+            resposta = resposta_falada(extrair_resposta(conversa))
+            if resposta:
+                print(f"\nNexus: {resposta}")
         except KeyboardInterrupt:
             print("\nInterrompido.")
         except Exception as erro:
