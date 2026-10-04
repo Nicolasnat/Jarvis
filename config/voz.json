@@ -1,5 +1,13 @@
 {
   "modelo": "pt_BR-faber-medium",
   "velocidade": 1.0,
-  "profundidade": 1.0
+  "profundidade": 1.0,
+  "wake_frases": ["nexus", "nexo", "nexus iniciar", "oi nexus", "hey nexus"],
+  "wake_confirmacao": 2,
+  "wake_debug": false,
+  "barge_limiar": 0.008,
+  "barge_fator": 2.5,
+  "barge_limiar_falando": 0.03,
+  "barge_fator_falando": 8.0,
+  "barge_duracao": 0.45
 }

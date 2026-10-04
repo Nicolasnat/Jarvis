@@ -1,4 +1,4 @@
-"""Troca a voz do Jarvis sem precisar editar codigo.
+"""Troca a voz do Nexus sem precisar editar codigo.
 
 O Piper tem poucas vozes em portugues: sao 3 alternativas para o pt-BR alem da
 que ja vem instalada. Este script lista as opcoes, deixa voce ouvir uma amostra
@@ -54,7 +54,7 @@ def _catalogo():
 
 
 def _disponiveis():
-    """Vozes do piper que servem para o Jarvis falar portugues."""
+    """Vozes do piper que servem para o Nexus falar portugues."""
     return sorted(k for k in _catalogo() if k.lower().startswith("pt"))
 
 
@@ -74,7 +74,7 @@ def _baixar(nome):
 
 
 def main(argv=None):
-    ap = argparse.ArgumentParser(description="Troca a voz do Jarvis")
+    ap = argparse.ArgumentParser(description="Troca a voz do Nexus")
     ap.add_argument("--listar", action="store_true", help="mostra as voces em portugues")
     ap.add_argument("--atual", action="store_true", help="mostra a voz em uso")
     ap.add_argument("--ouvir", metavar="VOZ", help="fala uma amostra com essa voz")
@@ -114,7 +114,7 @@ def main(argv=None):
         saida = Path(tempfile.mkdtemp()) / "amostra.wav"
         with wave.open(str(saida), "wb") as wav:
             tom.synthesize_wav(
-                "Jarvis online. Tudo pronto para ouvir voce.",
+                "Nexus online. Tudo pronto para ouvir voce.",
                 wav,
                 syn_config=voz._config_sintese(),
             )

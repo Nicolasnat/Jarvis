@@ -1,9 +1,9 @@
-# Dependencias Python do Jarvis (instale com: ./venv/bin/pip install -r requirements.txt)
+# Dependencias Python do Nexus (instale com: ./venv/bin/pip install -r requirements.txt)
 ollama
 ddgs
 psutil
 faster-whisper
-openwakeword
+vosk
 av==12.3.0
 piper-tts
 chromadb

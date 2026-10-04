@@ -1,8 +1,8 @@
-# 🤖 Jarvis
+# 🤖 Nexus
 
 Assistente de IA **local** em português do Brasil, que roda no terminal e **delega o trabalho pesado** para outras ferramentas: o cérebro conversa e decide, o [OpenCode](https://opencode.ai) escreve e executa o código de verdade, e o Antigravity (Gemini) faz o papel de arquiteto em projetos grandes.
 
-> O Jarvis nunca escreve código por conta própria. Ele entende o pedido, escolhe a ferramenta certa e relata o que realmente aconteceu no disco.
+> O Nexus nunca escreve código por conta própria. Ele entende o pedido, escolhe a ferramenta certa e relata o que realmente aconteceu no disco.
 
 ---
 
@@ -16,7 +16,7 @@ Assistente de IA **local** em português do Brasil, que roda no terminal e **del
 - 🧩 **Arquitetura de plugins**: cada ferramenta é um arquivo em `ferramentas/`, carregado automaticamente
 - 🗒️ **Memória, tarefas, lembretes e anotações** persistentes em `dados/`
 - 🖥️ **Controla o sistema**: status de CPU/RAM/disco, abre e fecha programas, volume, brilho e área de transferência
-- 🎙️ **Modo voz** (`--voz`): escuta a palavra "Jarvis", transcreve e responde falando (100% offline, voz neural Piper pt-BR)
+- 🎙️ **Modo voz** (`--voz`): escuta a wakeword "Nexus" ou "Hey Nexus" (ver nota abaixo), transcreve e responde falando (100% offline, voz neural Piper pt-BR)
 - 🛎️ **Serviço em segundo plano** (`--servico`): roda sozinho no login, sem terminal; modelos pesados são descarregados quando ociosos
 - 📚 **RAG local**: indexe documentos (txt, md, pdf, docx) e faça perguntas com base neles
 - 📂 **Organiza arquivos**: lista projetos, cria pastas, abre o VS Code e o gerenciador de arquivos
@@ -27,7 +27,7 @@ Assistente de IA **local** em português do Brasil, que roda no terminal e **del
 ## 🧩 Como funciona
 
 ```
-Você ──► Jarvis (llama3.1:8b via Ollama)
+Você ──► Nexus (llama3.1:8b via Ollama)
               │
               ├── código / projeto ──► OpenCode  ──► executa no disco
               │        ▲
@@ -37,7 +37,7 @@ Você ──► Jarvis (llama3.1:8b via Ollama)
               ├── fatos atuais ───────► busca na web (DDGS)
               ├── memória / tarefas / lembretes ─► dados/*.json
               ├── sistema ────────────► psutil, pactl, xclip, apps.json
-              ├── voz ────────────────► arecord + openwakeword + faster-whisper
+              ├── voz ────────────────► arecord + vosk + faster-whisper
               └── documentos ─────────► ChromaDB + nomic-embed-text
 ```
 
@@ -54,24 +54,24 @@ Você ──► Jarvis (llama3.1:8b via Ollama)
 
 ### Garantias contra "alucinação"
 
-- **Roteamento de intenção**: se o pedido parece ser de código e o modelo não acionou o OpenCode, o Jarvis **força a delegação**.
+- **Roteamento de intenção**: se o pedido parece ser de código e o modelo não acionou o OpenCode, o Nexus **força a delegação**.
 - **Anti-duplicação**: o OpenCode é chamado uma única vez por turno.
-- **Normalização de argumentos**: modelos pequenos às vezes trocam o nome dos parâmetros; o Jarvis remapeia em vez de falhar.
+- **Normalização de argumentos**: modelos pequenos às vezes trocam o nome dos parâmetros; o Nexus remapeia em vez de falhar.
 - **Relato fiel**: o prompt do sistema obriga o assistente a relatar apenas o que a ferramenta retornou.
 
 ---
 
 ## 🛡️ Segurança
 
-O Jarvis tem três camadas de proteção para o que é enviado ao OpenCode e ao Antigravity:
+O Nexus tem três camadas de proteção para o que é enviado ao OpenCode e ao Antigravity:
 
 1. **Bloqueio total** — comandos que destroem o sistema ou vazam credenciais (`rm -rf /`, `mkfs*`, `dd of=/dev/*`, fork bomb, `cat ~/.ssh*`...). Nem chegam a ser enviados.
-2. **Confirmação** — operações sensíveis mas legítimas (`sudo`, `git push`, `apt`, `chmod`, `kill -9`, `drop table`...). O Jarvis pergunta e só executa se você digitar `sim`.
+2. **Confirmação** — operações sensíveis mas legítimas (`sudo`, `git push`, `apt`, `chmod`, `kill -9`, `drop table`...). O Nexus pergunta e só executa se você digitar `sim`.
 3. **Permissões do OpenCode** — o arquivo `opencode-permissoes.json` é gerado automaticamente e aplicado via `OPENCODE_CONFIG`. Ele nega leitura e escrita em `~/.ssh`, `~/.aws`, `/etc`, `/usr` etc., bloqueia `.env` e permite `rm -rf` apenas dentro da pasta de projetos.
 
 Ferramentas que executam comandos ou fecham processos passam por uma verificação central (`detectar_graves` + `confirmar_risco`). Ao fechar um programa, a confirmação é **sempre** pedida. O plugin `indexar_documentos` só aceita caminhos dentro da sua pasta pessoal e recusa pastas de credenciais e arquivos `.env`.
 
-> ⚠️ **Atenção:** o Antigravity roda com `--dangerously-skip-permissions`. As regras para ele são injetadas num bloco gerenciado do `~/.gemini/GEMINI.md` (o conteúdo existente é preservado), mas isso é uma instrução ao modelo, não um bloqueio técnico. Use com cuidado.
+> ⚠️ **Atenção:** por padrão o Antigravity roda com `--dangerously-skip-permissions` (o modo headless `-p` não consegue pedir aprovação). As regras para ele são injetadas num bloco gerenciado do `~/.gemini/GEMINI.md` (o conteúdo existente é preservado), mas isso é uma instrução ao modelo, não um bloqueio técnico. Use com cuidado. Alternativa mais segura: ligar `ANTIGRAVITY_SANDBOX = True` no `nexus.py` e cadastrar as permissões necessárias em `permissions.allow` do `~/.gemini/antigravity-cli/settings.json` — sem essas regras, o sandbox **auto-recusa** as ferramentas em `-p`.
 
 ---
 
@@ -119,17 +119,21 @@ Com o Ollama rodando (`ollama serve`):
 
 ```bash
 # Modo texto (padrão)
-python jarvis.py
+python nexus.py
 
-# Modo voz: diga "Jarvis" para falar; Ctrl+C encerra
-python jarvis.py --voz
+# Modo voz: diga "Nexus" (ou "Hey Nexus") para falar; Ctrl+C encerra
+python nexus.py --voz
 ```
+
+> A wakeword é **"Nexus"** (valem também "Hey Nexus", "Oi Nexus" e "Nexus iniciar"): o reconhecimento é por palavras-chave (Vosk), então basta dizer "Nexus". As frases aceitas ficam em `config/voz.json` (`wake_frases`) e o modelo é baixado uma vez conforme [`INSTALACAO.md`](INSTALACAO.md).
+>
+> A qualquer momento — respondendo, tocando música ou com um agente de código no meio de uma tarefa — é só falar para interromper: um simples "para" já cancela. Veja [`INSTALACAO.md`](INSTALACAO.md) para calibrar o microfone em `config/voz.json`.
 
 > A voz usa o Piper (modelo `pt_BR-faber-medium`, baixado uma vez conforme [`INSTALACAO.md`](INSTALACAO.md)). Se o modelo não estiver presente, cai para `espeak-ng`/`spd-say`.
 
 ### Rodando em segundo plano (sem terminal)
 
-Para o Jarvis ficar sempre disponível (é só dizer "Jarvis"), instale-o como
+Para o Nexus ficar sempre disponível (é só dizer "Nexus"), instale-o como
 serviço de usuário do systemd:
 
 ```bash
@@ -139,11 +143,11 @@ serviço de usuário do systemd:
 Ele passa a iniciar sozinho no login e fica ouvindo em segundo plano. Controle:
 
 ```bash
-systemctl --user status jarvis     # ver estado
-journalctl --user -u jarvis -f     # acompanhar logs
-systemctl --user stop jarvis       # parar agora
-systemctl --user start jarvis      # iniciar de novo
-systemctl --user disable --now jarvis   # remover do login
+systemctl --user status nexus     # ver estado
+journalctl --user -u nexus -f     # acompanhar logs
+systemctl --user stop nexus       # parar agora
+systemctl --user start nexus      # iniciar de novo
+systemctl --user disable --now nexus   # remover do login
 ```
 
 > **Memória sob controle**: em repouso, só o detector de wakeword fica carregado
@@ -180,7 +184,7 @@ Para encerrar, digite `sair`.
 
 ## ⚙️ Configuração
 
-As constantes ficam no topo do `jarvis.py`:
+As constantes ficam no topo do `nexus.py`:
 
 | Constante | Padrão | Descrição |
 |---|---|---|
@@ -191,17 +195,19 @@ As constantes ficam no topo do `jarvis.py`:
 | `TEMPO_PLANO` | `360` | Timeout (s) para o planejamento |
 | `PERMISSOES_AUTOMATICAS` | `True` | Roda o OpenCode com `--auto` |
 | `LIMITE_HISTORICO` | `14` | Mensagens mantidas no contexto |
-| `MODELO_ANTIGRAVITY` | `gemini-3.1-pro-high` | Modelo usado pelo Antigravity |
+| `MODELO_ARQUITETO` | `gemini-3.1-pro-high` | Modelo do Antigravity para planejar |
+| `MODELO_EXECUTOR` | `gemini-3.8-flash-high` | Modelo do Antigravity para executar |
+| `ANTIGRAVITY_SANDBOX` | `False` | Roda o Antigravity em `--sandbox` (exige allow-rules; ver nota) |
 | `ANTIGRAVITY_PLANEJA` | `True` | Liga/desliga o planejamento automático |
 
 As listas `BLOQUEIOS`, `CREDENCIAIS`, `CONFIRMACOES` e `CAMINHOS_PROIBIDOS` definem a política de segurança.
 
-A lista de programas que o Jarvis pode abrir/fechar fica em [`config/apps.json`](config/apps.json).
+A lista de programas que o Nexus pode abrir/fechar fica em [`config/apps.json`](config/apps.json).
 
 ### 📦 Descobrir aplicativos
 
 O `apps.json` é gerado a partir dos arquivos `.desktop` do sistema. Diga
-**"Jarvis, lê meus aplicativos"** (ou rode `descobrir_apps`) e ele registra
+**"Nexus, lê meus aplicativos"** (ou rode `descobrir_apps`) e ele registra
 tudo que estiver instalado, com apelidos em português — "Visual Studio Code"
 também responde a `vscode` e `code`. A busca ignora acentos, maiúsculas e
 artigos, então "abre o gerenciador de arquivos" acha o `nautilus`.
@@ -220,12 +226,12 @@ estiverem na varredura. Nomes cadastrados à mão não são sobrescritos: seu
 ## 🗂️ Estrutura
 
 ```
-Jarvis/
-├── jarvis.py                  # Aplicação principal (loop, intenção, segurança, pipeline)
+Nexus/
+├── nexus.py                  # Aplicação principal (loop, intenção, segurança, pipeline)
 ├── comum.py                   # Helpers compartilhados (caminhos, JSON, memória no prompt)
 ├── voz.py                     # Wakeword, transcrição e fala (usado com --voz)
-├── jarvis.service             # Modelo do serviço systemd (usado pelo instalador)
-├── instalar_servico.sh        # Instala/ativa o Jarvis como serviço de usuário
+├── nexus.service             # Modelo do serviço systemd (usado pelo instalador)
+├── instalar_servico.sh        # Instala/ativa o Nexus como serviço de usuário
 ├── ferramentas/
 │   ├── carregador.py          # Carrega os plugins automaticamente
 │   ├── _agenda.py             # Motor de lembretes em segundo plano

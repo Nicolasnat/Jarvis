@@ -23,6 +23,15 @@ PARAMETROS = esquema(
 )
 SEGURANCA = "detectar"
 
+APELIDOS = {
+    "vscode": "code",
+    "vs code": "code",
+    "visual studio code": "code",
+    "visual studio": "code",
+    "navegador": "chrome",
+    "google chrome": "chrome",
+}
+
 
 def _catalogo():
     apps = ler_json(ARQUIVO_APPS, {})
@@ -50,6 +59,10 @@ def _comando_para(app: str):
     if pedido in indice:
         return indice[pedido], None
 
+    alias = {chave_nome(k): chave_nome(v) for k, v in APELIDOS.items()}.get(pedido)
+    if alias in indice:
+        return indice[alias], None
+
     # Prefere quem comeca com o que foi falado, para "spot" achar "spotify".
     prefixos = [chave for chave in indice if chave.startswith(pedido)]
     if prefixos:
@@ -66,6 +79,10 @@ def _comando_para(app: str):
         parecidos = difflib.get_close_matches(pedido, indice.keys(), n=1, cutoff=corte)
         if parecidos:
             return indice[parecidos[0]], None
+
+    for chave in sorted(indice, key=len, reverse=True):
+        if len(chave) >= 4 and pedido.endswith(chave):
+            return indice[chave], None
 
     return None, (
         f"Nao achei '{app}' na lista de aplicativos. "

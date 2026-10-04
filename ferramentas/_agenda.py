@@ -117,7 +117,7 @@ def cancelar(identificador):
 
 def _notificar(mensagem: str):
     try:
-        subprocess.run(["notify-send", "Jarvis", mensagem], timeout=10, check=False)
+        subprocess.run(["notify-send", "Nexus", mensagem], timeout=10, check=False)
     except (FileNotFoundError, subprocess.SubprocessError):
         pass
     if _aviso:
@@ -125,7 +125,7 @@ def _notificar(mensagem: str):
             _aviso(mensagem)
         except Exception:
             pass
-    print(f"\n[jarvis] LEMBRETE: {mensagem}", flush=True)
+    print(f"\n[nexus] LEMBRETE: {mensagem}", flush=True)
 
 
 def _loop():
