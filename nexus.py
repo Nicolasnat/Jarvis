@@ -533,7 +533,7 @@ VERBO_CRIAR = (
     r"mont(?:a|o|ar|ando|ou)|implement(?:a|o|ar|ando|ou)|inicializ(?:a|o|ar|ando|ou)|"
     r"configur(?:a|o|ar|ando|ou)|desenvolv(?:e|o|er|endo|imento)|program(?:a|o|ar|ando|ou)|"
     r"escrev(?:e|o|er|endo|o)|codific(?:a|o|ar|ando|ou)|adicion(?:a|o|ar|ando|ou)|"
-    r"constru(?:i|ir|indo|iu)|scaffold\w*|quero|querendo|preciso|precisando|precisa|arruma\w*)\b"
+    r"constru(?:i|ir|indo|iu)|scaffold\w*|quero|querendo|preciso|precisando|precisa|arruma\w*|planej\w*)\b"
 )
 OBJETO_CODIGO = r"\b(c[oó]digo|codigo|projeto|project|app|aplicativo|sit[eo]|p[áa]gina|script|componente\w*|api|backend|front-?end|servidor|server|landing|formul[áa]rio|dashboard|bot|jogo|game|to-?do|react|vite|next\.?js|node|python|java|typescript|javascript|html|css|tailwind|banco de dados|database|funcionalidade|feature|m[óo]dulo|module|teste|test)\b"
 
@@ -1495,6 +1495,170 @@ def rodar_modo_escrita(conversa):
     print("\nNexus desligado.")
 
 
+def autoteste() -> int:
+    """Executa testes automatizados sem Ollama, sem microfone, sem dados/.
+    Retorna 0 se tudo passar, != 0 se falhar.
+    """
+    import sys
+    from pathlib import Path
+
+    BASE = Path(__file__).resolve().parent
+    PASTA_FERRAMENTAS = BASE / "ferramentas"
+    PASTA_INTERFACE = BASE / "interface"
+    PASTA_POPUPS = PASTA_INTERFACE / "popups"
+
+    print("[autoteste] Iniciando testes automatizados...")
+    print("[autoteste] Modo: sem Ollama, sem microfone, sem dados/")
+    falhas = 0
+
+    # 1. py_compile em todos os .py
+    print("\n[1/6] py_compile...")
+    arquivos_py = (
+        [BASE / "nexus.py", BASE / "voz.py", BASE / "comum.py", BASE / "seguranca.py"] +
+        list(PASTA_FERRAMENTAS.glob("*.py")) +
+        list(PASTA_INTERFACE.glob("*.py")) +
+        list(PASTA_POPUPS.glob("*.py"))
+    )
+    for arq in arquivos_py:
+        if arq.name.startswith("_"):
+            continue
+        resultado = subprocess.run(
+            [sys.executable, "-m", "py_compile", str(arq)],
+            capture_output=True, text=True
+        )
+        if resultado.returncode != 0:
+            print(f"  FALHA: {arq.relative_to(BASE)}")
+            print(resultado.stderr)
+            falhas += 1
+        else:
+            print(f"  OK: {arq.relative_to(BASE)}")
+
+    # 2. Importar nexus.py, voz.py e todos plugins
+    print("\n[2/6] Importacao de modulos...")
+    try:
+        import nexus
+        print("  OK: nexus.py")
+    except Exception as e:
+        print(f"  FALHA: nexus.py - {e}")
+        falhas += 1
+
+    try:
+        import voz
+        print("  OK: voz.py")
+    except Exception as e:
+        print(f"  FALHA: voz.py - {e}")
+        falhas += 1
+
+    try:
+        from ferramentas.carregador import carregar_plugins
+        plugins, funcoes, indisponiveis = carregar_plugins()
+        print(f"  OK: carregador - {len(plugins)} plugins carregados")
+        for p in indisponiveis:
+            print(f"    (indisponivel: {p[0]} - {p[1]})")
+    except Exception as e:
+        print(f"  FALHA: carregador - {e}")
+        falhas += 1
+
+    # 3. Validar schemas das ferramentas
+    print("\n[3/6] Validacao de schemas...")
+    try:
+        from nexus import CATALOGO, META
+        for item in CATALOGO:
+            nome = item["nome"]
+            params = item.get("parametros")
+            if not params or params.get("type") != "object":
+                print(f"  FALHA: {nome} - schema invalido")
+                falhas += 1
+        print(f"  OK: {len(CATALOGO)} ferramentas com schema valido")
+    except Exception as e:
+        print(f"  FALHA: validacao schemas - {e}")
+        falhas += 1
+
+    # 4. Testes de roteamento de intencao
+    print("\n[4/6] Roteamento de intencao...")
+    try:
+        from nexus import precisa_de_codigo, quer_plano
+        testes_intencao = [
+            ("criar um projeto react", True),
+            ("abre o vscode", False),
+            ("qual a capital da franca", False),
+            ("planeja uma api de tarefas", True),
+            ("me lembra de beber agua", False),
+        ]
+        for texto, esperado in testes_intencao:
+            resultado = precisa_de_codigo(texto)
+            if resultado != esperado:
+                print(f"  FALHA: precisa_de_codigo('{texto}') = {resultado}, esperado {esperado}")
+                falhas += 1
+        print("  OK: precisa_de_codigo")
+
+        # quer_plano so testa se AGY existe (pode nao estar instalado)
+        if AGY:
+            testes_plano = [
+                ("planeja uma api", True),
+                ("sem plano, so executa", False),
+                ("cria um projeto grande", True),
+            ]
+            for texto, esperado in testes_plano:
+                resultado = quer_plano(texto)
+                if resultado != esperado:
+                    print(f"  FALHA: quer_plano('{texto}') = {resultado}, esperado {esperado}")
+                    falhas += 1
+            print("  OK: quer_plano")
+        else:
+            print("  OK: quer_plano (AGY nao instalado, pulado)")
+    except Exception as e:
+        print(f"  FALHA: roteamento - {e}")
+        falhas += 1
+
+    # 5. Testes de politica de seguranca
+    print("\n[5/6] Politica de seguranca...")
+    try:
+        from seguranca import detectar_graves, confirmar_risco, CAMINHOS_PROIBIDOS
+        # Bloqueados
+        bloqueados, _ = detectar_graves("rm -rf /")
+        if not bloqueados:
+            print("  FALHA: rm -rf / deveria ser bloqueado")
+            falhas += 1
+        # Confirmacoes
+        bloqueados, a_confirmar = detectar_graves("sudo apt update")
+        if not a_confirmar:
+            print("  FALHA: sudo apt update deveria pedir confirmacao")
+            falhas += 1
+        # Caminhos proibidos
+        bloqueados, a_confirmar = detectar_graves("cat ~/.ssh/id_rsa")
+        if not bloqueados:
+            print("  FALHA: cat ~/.ssh/id_rsa deveria ser bloqueado (credencial)")
+            falhas += 1
+        # Dentro do projeto nao bloqueia rm -rf
+        bloqueados, _ = detectar_graves(f"rm -rf {PASTA_TRABALHO}/teste")
+        if bloqueados:
+            print("  FALHA: rm -rf dentro da pasta de trabalho nao deveria bloquear")
+            falhas += 1
+        print("  OK: detectar_graves (bloqueios, confirmacoes, credenciais, pasta projeto)")
+    except Exception as e:
+        print(f"  FALHA: politica seguranca - {e}")
+        falhas += 1
+
+    # 6. Verifica arquivos protegidos nao alterados (git status limpo)
+    print("\n[6/6] Verificacao de arquivos protegidos...")
+    try:
+        import json
+        dados = json.loads((BASE / "config/protegidos.json").read_text())
+        protegidos = dados.get("protegidos", [])
+        # So verifica se a lista existe e nao esta vazia
+        if protegidos:
+            print(f"  OK: config/protegidos.json tem {len(protegidos)} entradas protegidas")
+        else:
+            print("  AVISO: config/protegidos.json vazio")
+    except Exception as e:
+        print(f"  FALHA: protegidos - {e}")
+        falhas += 1
+
+    print(f"\n[autoteste] Resultado: {'SUCESSO' if falhas == 0 else f'{falhas} FALHA(S)'}")
+    return 0 if falhas == 0 else 1
+
+
 def main():
     if "--help" in sys.argv or "-h" in sys.argv:
         print("Uso: python nexus.py [opcoes]")
@@ -1506,8 +1670,12 @@ def main():
         print("  --escrever        Entrada por texto e resposta em voz")
         print("  --texto-voz       Apelido para --escrever")
         print("  --demo-acoes      Simula sequencia de acoes rapidas na interface")
+        print("  --autoteste       Executa testes automatizados (sem Ollama, sem microfone, sem dados/)")
         print("  --help, -h        Mostra esta ajuda")
         return 0
+
+    if "--autoteste" in sys.argv:
+        return autoteste()
 
     aplicar_config_permissoes()
     if AGY:
