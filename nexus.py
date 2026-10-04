@@ -2140,8 +2140,6 @@ def teste_cerebro():
         if idx + 1 < len(sys.argv):
             cerebro_modelo = sys.argv[idx + 1]
 
-    os.environ.setdefault("GEMINI_API_KEY_GRATIS", "REDACTED_API_KEY")
-
     from cerebro import get_gerenciador, chat, MensagemNeutra, EstadoProvedor
     from ferramentas.resumo_contexto import limpar_resumo
     g = get_gerenciador()
