@@ -35,6 +35,7 @@ from cerebro import (
     MAX_PASSOS_LOCAL,
     obter_provedor_ativo,
 )
+from ferramentas.resumo_contexto import resumir_contexto, limpar_resumo
 
 
 TEMPO_PADRAO = 120
@@ -1215,7 +1216,8 @@ def rodar_turno(conversa, texto: str):
             print("[nexus] Interrompido antes do proximo passo.", flush=True)
             break
 
-        conversa = podar(conversa)
+        # Resumo de contexto: mantem ultimas N integro + resumo do antigo
+        conversa = resumir_contexto(conversa, cerebro_chat)
         _definir_estado("pensando")
         mensagem = _chamar_modelo(conversa)
         conversa.append(mensagem)
