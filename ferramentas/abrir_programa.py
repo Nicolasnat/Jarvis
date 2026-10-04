@@ -32,6 +32,46 @@ APELIDOS = {
     "google chrome": "chrome",
 }
 
+SITES_CONHECIDOS = {
+    "claude": "https://claude.ai",
+    "chatgpt": "https://chat.openai.com",
+    "chat gpt": "https://chat.openai.com",
+    "whatsapp": "https://web.whatsapp.com",
+    "web whatsapp": "https://web.whatsapp.com",
+    "gmail": "https://mail.google.com",
+    "google": "https://www.google.com",
+    "youtube": "https://www.youtube.com",
+    "github": "https://github.com",
+    "gitlab": "https://gitlab.com",
+    "linkedin": "https://www.linkedin.com",
+    "twitter": "https://twitter.com",
+    "x twitter": "https://twitter.com",
+    "facebook": "https://www.facebook.com",
+    "instagram": "https://www.instagram.com",
+    "reddit": "https://www.reddit.com",
+    "stackoverflow": "https://stackoverflow.com",
+    "google drive": "https://drive.google.com",
+    "drive": "https://drive.google.com",
+    "google maps": "https://maps.google.com",
+    "maps": "https://maps.google.com",
+    "google tradutor": "https://translate.google.com",
+    "tradutor": "https://translate.google.com",
+    "notion": "https://www.notion.so",
+    "figma": "https://www.figma.com",
+    "canva": "https://www.canva.com",
+    "spotify web": "https://open.spotify.com",
+    "netflix": "https://www.netflix.com",
+    "prime video": "https://www.primevideo.com",
+    "disney": "https://www.disneyplus.com",
+    "globoplay": "https://globoplay.globo.com",
+    "twitch": "https://www.twitch.tv",
+    "discord": "https://discord.com/app",
+    "telegram web": "https://web.telegram.org",
+    "teams": "https://teams.microsoft.com",
+    "meet": "https://meet.google.com",
+    "zoom": "https://zoom.us",
+}
+
 
 def _catalogo():
     apps = ler_json(ARQUIVO_APPS, {})
@@ -52,9 +92,20 @@ def _comando_para(app: str):
             "programas instalados."
         )
 
-    pedido = chave_nome(app)
+    # Verifica URL no original (antes de normalizar)
+    app_strip = (app or "").strip()
+    if app_strip.startswith(("http://", "https://", "www.")):
+        return ["xdg-open", app_strip], None
+
+    pedido = chave_nome(app_strip)
     if not pedido:
         return None, "Nao entendi qual programa abrir. Diga o nome, ex.: 'abre o vscode'."
+
+    # Verifica se e um site conhecido
+    if pedido in SITES_CONHECIDOS:
+        url = SITES_CONHECIDOS[pedido]
+        # Tenta abrir no navegador padrao (xdg-open) que ja abre o browser se fechado
+        return ["xdg-open", url], None
 
     if pedido in indice:
         return indice[pedido], None

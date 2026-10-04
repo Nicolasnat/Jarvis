@@ -137,8 +137,7 @@ microfone nem fala.
 
 Diga **"Nexus"** (valem também "Hey Nexus", "Oi Nexus" e "Nexus iniciar") e
 espere o "Ouvindo.". Depois é só dizer o comando — não precisa repetir "Nexus".
-Fale por cima a qualquer momento para interromper; um "para" cancela o que
-estiver rolando.
+Fale por cima a qualquer momento para interromper; **"para"**, **"cancelar"**, **"cancela"**, **"interromper"** cancelam o que estiver rolando.
 
 > A wakeword é reconhecida por palavras-chave (Vosk), então não precisa de
 > treino. As frases aceitas ficam em `config/voz.json` (`wake_frases`) e o modelo
@@ -223,7 +222,12 @@ Você: me lembra de beber água em 20 minutos
 Você: adicione "revisar o PR" às minhas tarefas
 Você: como está o sistema?
 Você: abra o navegador
+Você: abra o claude
+Você: abra o whatsapp no navegador
+Você: abra https://github.com
 Você: deixe o volume em 40
+Você: cancelar
+Você: interromper
 Você: indexe a pasta ~/Documentos/faculdade e me explique o capítulo 3
 ```
 
@@ -327,7 +331,7 @@ Nexus/
 | `agendar_lembrete` / `listar_lembretes` / `cancelar_lembrete` | Lembretes com notificação |
 | `anotar` | Anotações rápidas por dia |
 | `status_sistema` | CPU, RAM, disco, uptime e bateria |
-| `abrir_programa` / `fechar_programa` | Abre/fecha programas da lista permitida |
+| `abrir_programa` / `fechar_programa` | Abre/fecha programas e **sites** (ex.: "abre o claude", "abre whatsapp", "abre https://site.com"). Se o navegador estiver fechado, abre automaticamente. |
 | `descobrir_apps` / `listar_apps` | Escaneia os apps instalados e lista os disponíveis |
 | `spotify` | Toca música ou playlist pelo nome (casa a playlist mais parecida), pausar, próxima, volume *(exige Spotify Premium)* |
 | `definir_volume` | Volume do sistema (0–100) |
