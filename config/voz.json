@@ -9,5 +9,6 @@
   "barge_fator": 2.5,
   "barge_limiar_falando": 0.012,
   "barge_fator_falando": 3.0,
-  "barge_duracao": 0.45
+  "barge_duracao": 0.45,
+  "espera_silencio": 2.5
 }

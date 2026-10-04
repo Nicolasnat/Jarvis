@@ -4,3 +4,4 @@ __pycache__/
 dados/
 config/spotify.json
 venv/
+config/gemini.json

@@ -30,15 +30,61 @@ sudo apt install xdg-utils libnotify-bin pulseaudio-utils brightnessctl xclip al
 ```
 
 ## Voz neural (Piper)
-
+ 
 A voz natural em portugues do Brasil usa o Piper (`piper-tts`, instalado pelo
 `requirements.txt`). Baixe o modelo de voz uma unica vez:
-
+ 
 ```bash
 ./venv/bin/python -m piper.download_voices pt_BR-faber-medium --download-dir dados/voz
 ```
-
+ 
 Sem esse modelo, o Nexus cai automaticamente para espeak-ng/spd-say (mais robotico).
+ 
+## Chave da API Gemini (para modo nuvem)
+ 
+O Nexus pode usar o **Gemini gratuito** como cerebro principal (mais rapido e
+capaz que o modelo local), com fallback automatico para o modo local (Ollama).
+ 
+### Como obter a chave (nivel gratuito)
+ 
+1. Acesse <https://aistudio.google.com/apikey> com sua conta Google.
+2. Clique **"Create API key"** → escolha **"Create API key in new project"**.
+3. Dê um nome (ex.: `nexus`) e crie.
+4. Copie a chave (comeca com `AIza...`).
+ 
+> **Importante:** O nivel gratuito tem limites baixos por projeto e por modelo.
+> Passar do limite dá erro 429 e o Nexus usa o modo local automaticamente.
+> Confira nos termos como o Google trata os dados enviados no nivel gratuito
+> (o que voce fala vai para a nuvem enquanto o Gemini for o cerebro; o modo
+> privado evita isso).
+ 
+### Configurar a chave (opcao 1: wizard interativo)
+ 
+```bash
+./venv/bin/python nexus.py --configurar-cerebro
+```
+ 
+O wizard explica o passo a passo, pede a chave (entrada oculta), valida, lista
+os modelos que a chave consegue usar, deixa voce escolher, testa function calling
+e grava em `config/gemini.json` (permissao 600). Tambem aceita a variavel de
+ambiente `GEMINI_API_KEY_GRATIS`.
+ 
+### Configurar a chave (opcao 2: variavel de ambiente)
+ 
+```bash
+export GEMINI_API_KEY_GRATIS="SUA_CHAVE_AQUI"
+```
+ 
+Adicione ao seu `.bashrc` ou `.profile` para persistir.
+ 
+### Seguranca da chave
+ 
+- `config/gemini.json` fica no `.gitignore` e em `config/protegidos.json` (o
+  auto-aprimoramento nao pode alterar).
+- Nao registrar a chave em logs, prompts ou saidas.
+- Padroes de chave (`AIza*`) sao mascarados em tudo que for a nuvem ou ao log.
+- Em `seguranca.py`, `CREDENCIAIS` inclui `*gemini.json*` e `AIza*`.
+- `opencode-permissoes.json` nega leitura do arquivo.
 
 ## Microfone (importante)
 
@@ -265,9 +311,32 @@ Editados em `config/protegidos.json` - o auto-aprimoramento NAO pode alterar:
 - "desfaz a ultima mudança" -> rollback com confirmacao
 
 ### Script de vigia
-
+ 
 `scripts/aplicar_e_vigiar.sh` - shell independente que:
 1. Reinicia `systemctl --user restart nexus`
 2. Espera 60s (configuravel via `NEXUS_VIGIA_TEMPO`)
 3. Checa `systemctl is-active nexus` + `dados/saude.ok` (timestamp < 2min)
 4. Se falhar: `git reset --hard` para tag `nexus-antes-<id>`, restart, notifica via `notify-send`
+ 
+## Novos comandos (Etapa 9)
+ 
+| Comando | Descricao |
+|---|---|
+| `--modo-privado` | Forca uso do cerebro local (privacidade total, nada sai da maquina) |
+| `--modo-nuvem` | Reabilita a cadeia de cerebros (Gemini gratuito -> local) |
+| `--configurar-cerebro` | Wizard interativo para criar/validar chave Gemini, listar modelos, testar function calling |
+| `--teste-cerebro` | Roda ~11 testes simulados (failover, limites, recuperacao, anti-loop, OpenCode max 1/turno, acao bloqueada, mascaramento chaves, historico neutro, saude.ok) |
+| `--teste-cerebro --cerebro local --modelo <nome>` | Testa modelo local especifico (ex: `llama3.1:8b`, `qwen2.5:7b`) |
+| `--teste-cerebro --cerebro nuvem` | Força teste com Gemini (requer chave configurada) |
+| `--autoteste` | Testes automatizados completos (py_compile, imports, schemas, roteamento, seguranca, protegidos) |
+ 
+### Testando modelos locais maiores
+ 
+```bash
+# Testar modelo local especifico
+./venv/bin/python nexus.py --teste-cerebro --cerebro local --modelo llama3.1:8b
+./venv/bin/python nexus.py --teste-cerebro --cerebro local --modelo qwen2.5:7b
+ 
+# Comparar com nuvem (requer chave)
+./venv/bin/python nexus.py --teste-cerebro --cerebro nuvem
+```

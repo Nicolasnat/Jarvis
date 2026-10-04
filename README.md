@@ -93,19 +93,19 @@ Ferramentas opcionais só aparecem se o binário estiver instalado.
 ---
 
 ## 🚀 Instalação
-
+ 
 ```bash
 # 1. Clone o repositório
-git clone https://github.com/Nicolasnat/Nexus.git
-cd Nexus
-
+git clone https://github.com/Nicolasnat/NEXUS.git
+cd NEXUS
+ 
 # 2. Crie e ative um ambiente virtual
 python3 -m venv venv
 source venv/bin/activate
-
+ 
 # 3. Instale as dependências Python
 pip install -r requirements.txt
-
+ 
 # 4. Baixe os modelos
 ollama pull llama3.1:8b
 ollama pull qwen2.5:7b
@@ -113,59 +113,97 @@ ollama pull nomic-embed-text
 ```
 
 Pacotes de sistema (opcionais) estão listados em [`INSTALACAO.md`](INSTALACAO.md).
-
+ 
 ## ▶️ Uso
-
-Há três jeitos de conversar com o Nexus: **digitando** (modo texto), **falando**
-(modo voz) ou **digitando e ouvindo a resposta** (modo escrita). Em todos, o
-Ollama precisa estar rodando (`ollama serve`).
-
+ 
+Há quatro jeitos de conversar com o Nexus: **digitando** (modo texto), **falando**
+(modo voz), **digitando e ouvindo a resposta** (modo escrita) ou **janela gráfica**.
+Em todos, o Ollama precisa estar rodando (`ollama serve`).
+ 
 ### Digitando (modo texto)
-
+ 
 ```bash
 ./venv/bin/python nexus.py
 ```
-
+ 
 Digite o pedido e tecle Enter; `sair` (ou Ctrl+D) encerra. Neste modo não há
 microfone nem fala.
-
+ 
 ### Falando (modo voz)
-
+ 
 ```bash
 ./venv/bin/python nexus.py --voz
 ```
-
+ 
 Diga **"Nexus"** (valem também "Hey Nexus", "Oi Nexus" e "Nexus iniciar") e
 espere o "Ouvindo.". Depois é só dizer o comando — não precisa repetir "Nexus".
 Fale por cima a qualquer momento para interromper; **"para"**, **"cancelar"**, **"cancela"**, **"interromper"** cancelam o que estiver rolando.
-
+ 
 > A wakeword é reconhecida por palavras-chave (Vosk), então não precisa de
 > treino. As frases aceitas ficam em `config/voz.json` (`wake_frases`) e o modelo
 > é baixado uma vez conforme [`INSTALACAO.md`](INSTALACAO.md). Para calibrar o
 > microfone, veja `config/voz.json` e `ajustar_microfone.sh`.
-
+ 
 > A voz usa o Piper (modelo `pt_BR-faber-medium`, baixado uma vez conforme [`INSTALACAO.md`](INSTALACAO.md)). Se o modelo não estiver presente, cai para `espeak-ng`/`spd-say`.
-
+ 
 ### Digitando e ouvindo a resposta
-
+ 
 ```bash
 ./venv/bin/python nexus.py --escrever
 ```
-
+ 
 Você **digita** (mais preciso que a transcrição de voz) e o Nexus **responde em
 voz** pelo Piper — bom com fones de ouvido ou quando o teclado está longe do
 microfone. `--texto-voz` é um apelido para o mesmo modo.
-
+ 
 ### Janela gráfica (interface de desktop)
-
+ 
 ```bash
 ./venv/bin/python nexus.py --interface
 ```
-
+ 
 Abre uma janela escura com um **orbe** no centro que pulsa conforme o Nexus fala
 ou escuta, uma barra de comando no rodapé e o estado atual (ocioso, ouvindo,
 pensando, falando, executando). O modo liga voz e texto juntos: você pode falar
 a wakeword ou digitar. Dizer a wakeword **traz a janela para a frente**.
+ 
+### Modo privado (apenas local)
+ 
+```bash
+./venv/bin/python nexus.py --modo-privado
+```
+ 
+Força o uso exclusivo do modelo local (Ollama). Nada sai da máquina — ideal para
+dados sensíveis. Combine com `--voz` ou `--interface`.
+ 
+### Modo nuvem (Gemini gratuito)
+ 
+```bash
+./venv/bin/python nexus.py --modo-nuvem
+```
+ 
+Reabilita a cadeia de cérebros (Gemini gratuito → local). Requer chave configurada
+via `--configurar-cerebro` ou variável `GEMINI_API_KEY_GRATIS`.
+ 
+### Configurar cadeia de cérebros (chave Gemini)
+ 
+```bash
+./venv/bin/python nexus.py --configurar-cerebro
+```
+ 
+Assistente interativo que ensina a criar a chave no Google AI Studio, lista os
+modelos disponíveis, testa function calling e salva em `config/gemini.json` (600).
+ 
+### Testar a cadeia de cérebros
+ 
+```bash
+./venv/bin/python nexus.py --teste-cerebro
+```
+ 
+Roda ~11 testes simulados (failover 429, limite mensal, recuperação, anti-loop,
+OpenCode max 1/turno, ação bloqueada, mascaramento de chaves, histórico neutro,
+saude.ok). Aceita `--cerebro local --modelo <nome>` e `--cerebro nuvem` para
+comparar modelos.
 
 Ao executar uma ferramenta, abre um **popup** com o resultado real dela (busca
 na web com as fontes, status do sistema com barras, volume/brilho, Spotify,

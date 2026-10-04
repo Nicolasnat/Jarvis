@@ -2,7 +2,11 @@
 from comum import ARQUIVO_TAREFAS, ler_json, salvar_json, esquema
 
 NOME = "concluir_tarefa"
-DESCRICAO = "Marca uma tarefa como concluida, pelo numero (#) ou por um trecho do texto."
+DESCRICAO = (
+    "MARCA TAREFA EXISTENTE COMO FEITA (pelo #numero ou texto). "
+    "Use para 'conclui tarefa 1', 'marca como feito', 'terminei X'. "
+    "NAO CRIA tarefa nem lembrete - so finaliza o que ja existe."
+)
 PARAMETROS = esquema(
     {"identificador": {"type": "string", "description": "Numero da tarefa (#3) ou trecho do texto"}},
     ["identificador"],

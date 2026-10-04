@@ -120,6 +120,7 @@ def iniciar_interface(ponte=None) -> ControladorInterface:
     if ponte is not None:
         # Conecta eventos da ponte aos widgets da janela
         ponte.estado_mudou.connect(janela.definir_estado)
+        ponte.cerebro_mudou.connect(janela.definir_cerebro)
         ponte.fala_nivel.connect(janela.orbe.set_nivel)
         janela.comando_digitado.connect(ponte.emitir_comando)
         janela.mic_pressionado.connect(ponte.mic_clicado.emit)

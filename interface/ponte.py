@@ -13,6 +13,7 @@ class Ponte(QObject):
     """Ponte de sinais Qt para desacoplar o nucleo da interface de desktop."""
 
     estado_mudou = Signal(str)
+    cerebro_mudou = Signal(str)
     fala_nivel = Signal(float)
     ferramenta_iniciada = Signal(str, dict)
     ferramenta_concluida = Signal(str, str)
@@ -34,6 +35,13 @@ class Ponte(QObject):
         """Emite sinal de atualizacao de estado (ocioso, ouvindo, etc.)."""
         try:
             self.estado_mudou.emit(str(estado))
+        except Exception:
+            pass
+
+    def emitir_cerebro(self, cerebro: str) -> None:
+        """Emite qual cerebro esta ativo no momento."""
+        try:
+            self.cerebro_mudou.emit(str(cerebro))
         except Exception:
             pass
 

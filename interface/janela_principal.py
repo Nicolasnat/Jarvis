@@ -313,8 +313,6 @@ class JanelaPrincipal(QWidget):
             self.pilula.item1.setStyleSheet(f"color: {COR_CIANO}; font-family: {FONTE_MONO}; font-size: 10px; font-weight: bold;")
             self.pilula.item2.setText("AGUARDANDO WAKEWORD")
             self.pilula.item2.setStyleSheet(f"color: {COR_TEXTO_MUTED}; font-family: {FONTE_MONO}; font-size: 10px; font-weight: bold;")
-            self.pilula.item3.setText("NEURAL LINK: ON")
-            self.pilula.item3.setStyleSheet(f"color: {COR_SUCESSO}; font-family: {FONTE_MONO}; font-size: 10px; font-weight: bold;")
             self.orbe.set_nivel(0.0)
 
         elif chave in ("ouvindo", "escutando"):
@@ -322,8 +320,6 @@ class JanelaPrincipal(QWidget):
             self.pilula.item1.setStyleSheet(f"color: {COR_CIANO}; font-family: {FONTE_MONO}; font-size: 10px; font-weight: bold;")
             self.pilula.item2.setText("ESCUTANDO COMANDO")
             self.pilula.item2.setStyleSheet(f"color: {COR_CIANO_BRILHO}; font-family: {FONTE_MONO}; font-size: 10px; font-weight: bold;")
-            self.pilula.item3.setText("CAPTURA: 16kHz")
-            self.pilula.item3.setStyleSheet(f"color: {COR_CIANO}; font-family: {FONTE_MONO}; font-size: 10px; font-weight: bold;")
             self.orbe.set_nivel(0.40)
 
         elif chave in ("pensando", "processando"):
@@ -331,8 +327,6 @@ class JanelaPrincipal(QWidget):
             self.pilula.item1.setStyleSheet(f"color: {COR_ALERTA}; font-family: {FONTE_MONO}; font-size: 10px; font-weight: bold;")
             self.pilula.item2.setText("PROCESSANDO NEURAL...")
             self.pilula.item2.setStyleSheet(f"color: {COR_ALERTA}; font-family: {FONTE_MONO}; font-size: 10px; font-weight: bold;")
-            self.pilula.item3.setText("OLLAMA: ATIVO")
-            self.pilula.item3.setStyleSheet(f"color: {COR_ALERTA}; font-family: {FONTE_MONO}; font-size: 10px; font-weight: bold;")
             self.orbe.set_nivel(0.20)
 
         elif chave in ("falando", "respondendo"):
@@ -340,8 +334,6 @@ class JanelaPrincipal(QWidget):
             self.pilula.item1.setStyleSheet(f"color: {COR_CIANO_BRILHO}; font-family: {FONTE_MONO}; font-size: 10px; font-weight: bold;")
             self.pilula.item2.setText("SINTESE PIPER")
             self.pilula.item2.setStyleSheet(f"color: {COR_CIANO}; font-family: {FONTE_MONO}; font-size: 10px; font-weight: bold;")
-            self.pilula.item3.setText("AUDIO OUT: ON")
-            self.pilula.item3.setStyleSheet(f"color: {COR_CIANO_BRILHO}; font-family: {FONTE_MONO}; font-size: 10px; font-weight: bold;")
             self.orbe.set_nivel(0.65)
 
         elif chave in ("executando", "ferramenta", "tarefa"):
@@ -352,12 +344,16 @@ class JanelaPrincipal(QWidget):
             else:
                 self.pilula.item2.setText("EXECUTANDO FERRAMENTA")
             self.pilula.item2.setStyleSheet(f"color: #ff4081; font-family: {FONTE_MONO}; font-size: 10px; font-weight: bold;")
-            self.pilula.item3.setText("KERNEL: ATIVO")
-            self.pilula.item3.setStyleSheet(f"color: #ff80ab; font-family: {FONTE_MONO}; font-size: 10px; font-weight: bold;")
             self.orbe.set_nivel(0.30)
 
         else:
             self.pilula.item2.setText(estado.upper())
+
+    def definir_cerebro(self, cerebro: str) -> None:
+        """Atualiza a pilula com o cerebro ativo atual."""
+        self.pilula.item3.setText(f"CEREBRO: {cerebro.upper()}")
+        from interface.estilo import COR_SUCESSO, FONTE_MONO
+        self.pilula.item3.setStyleSheet(f"color: {COR_SUCESSO}; font-family: {FONTE_MONO}; font-size: 10px; font-weight: bold;")
 
     def mostrar_ou_trazer(self) -> None:
         """Exibe a janela ou traz para a frente se estiver minimizada/oculta."""

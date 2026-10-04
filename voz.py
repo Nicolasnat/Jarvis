@@ -63,8 +63,8 @@ FATOR_BARGE_IN_ECHO = 3.0         # sobe o alvo se o mic captar a propria voz
 DURACAO_BARGE_IN = 0.45           # segundos de fala continua para interromper
 CALIBRACAO_VIGIA_BLOCOS = 5       # 5 x 80 ms medindo o chao antes de armar
 
-# Para de gravar 0.8s depois de voce parar de falar, em vez de esperar os 6s.
-ESPERA_SILENCIO = 0.8
+# Para de gravar 1.5s depois de voce parar de falar, em vez de esperar os 6s.
+ESPERA_SILENCIO = 1.5
 IDIOMA_ESPEAK = "pt-br"
 IDIOMA_SPD = "pt-BR"
 VOZ_SPD = "Portuguese (Brazil)"
@@ -139,6 +139,7 @@ FATOR_BARGE_IN = _numero(CONFIG_VOZ, "barge_fator", FATOR_BARGE_IN)
 LIMITE_BARGE_IN_FALANDO = _numero(CONFIG_VOZ, "barge_limiar_falando", LIMITE_BARGE_IN_FALANDO)
 FATOR_BARGE_IN_ECHO = _numero(CONFIG_VOZ, "barge_fator_falando", FATOR_BARGE_IN_ECHO)
 DURACAO_BARGE_IN = _numero(CONFIG_VOZ, "barge_duracao", DURACAO_BARGE_IN)
+ESPERA_SILENCIO = _numero(CONFIG_VOZ, "espera_silencio", ESPERA_SILENCIO)
 
 _modelo_vosk = None
 _modelo_fala = None
@@ -801,7 +802,7 @@ def _rms(bloco: bytes) -> float:
     return math.sqrt(sum(a * a for a in amostras) / len(amostras)) / 32768.0
 
 
-def gravar_ate_silencio(destino: Path, segundos=DURACAO_FALA, espera_silencio=0.8,
+def gravar_ate_silencio(destino: Path, segundos=DURACAO_FALA, espera_silencio=ESPERA_SILENCIO,
                          atencao_inicial=0.0, limiar=RMS_MINIMO * 6, inicio=None):
     """Grava e PARA SOZINHO quando o usuario termina de falar.
 
@@ -871,7 +872,7 @@ def gravar_ate_silencio(destino: Path, segundos=DURACAO_FALA, espera_silencio=0.
     return destino, falando
 
 
-def transcrever(segundos=DURACAO_FALA, espera_silencio=0.8, atencao_inicial=0.0) -> str:
+def transcrever(segundos=DURACAO_FALA, espera_silencio=ESPERA_SILENCIO, atencao_inicial=0.0) -> str:
     global _ultimo_uso_fala
     pasta = tempfile.mkdtemp()
     arquivo = Path(pasta) / "nexus_voz.wav"
@@ -934,7 +935,7 @@ def transcrever_arquivo(destino: Path) -> str:
             pass
 
 
-def comecar_a_gravar(segundos=DURACAO_FALA, espera_silencio=0.8, atencao_inicial=0.0,
+def comecar_a_gravar(segundos=DURACAO_FALA, espera_silencio=ESPERA_SILENCIO, atencao_inicial=0.0,
                      inicio=None):
     """Comeca a gravar em segundo plano, para o Nexus falar enquanto ouve.
 

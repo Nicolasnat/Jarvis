@@ -4,7 +4,12 @@ from datetime import datetime
 from comum import ARQUIVO_TAREFAS, ler_json, salvar_json, esquema
 
 NOME = "adicionar_tarefa"
-DESCRICAO = "Adiciona uma tarefa a lista de tarefas local."
+DESCRICAO = (
+    "ADICIONA item a LISTA DE TAREFAS (sem horario, so checklist). "
+    "Use para 'add tarefa', 'nova tarefa', 'anotar que preciso fazer X'. "
+    "NAO use 'agendar_lembrete' - essa e para avisar no horario (notificacao). "
+    "NAO use 'concluir_tarefa' - essa MARCA como feita, nao cria."
+)
 PARAMETROS = esquema(
     {"descricao": {"type": "string", "description": "O que precisa ser feito"}},
     ["descricao"],

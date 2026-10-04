@@ -4,7 +4,7 @@ import subprocess
 from comum import resolver, esquema
 
 NOME = "abrir_pasta"
-DESCRICAO = "Abre uma pasta no gerenciador de arquivos do sistema (Nautilus)."
+DESCRICAO = "Abre UMA PASTA EXISTENTE no gerenciador de arquivos do sistema (Nautilus). NAO CRIA pasta nova - use 'criar_pasta' para isso."
 PARAMETROS = esquema(
     {"caminho": {"type": "string", "description": "Pasta a abrir"}},
     ["caminho"],

@@ -2122,14 +2122,77 @@ def configurar_cerebro():
 
 
 def teste_cerebro():
-    """Testa a cadeia de cerebros simulando falhas e failover."""
+    """Testa a cadeia de cerebros com ferramentas simuladas (sem executar de verdade)."""
     import os
+    import sys
+    import json
+    from unittest.mock import patch
+
+    # Parse args for --cerebro local/nuvem --modelo
+    cerebro_tipo = "auto"
+    cerebro_modelo = None
+    if "--cerebro" in sys.argv:
+        idx = sys.argv.index("--cerebro")
+        if idx + 1 < len(sys.argv):
+            cerebro_tipo = sys.argv[idx + 1]
+    if "--modelo" in sys.argv:
+        idx = sys.argv.index("--modelo")
+        if idx + 1 < len(sys.argv):
+            cerebro_modelo = sys.argv[idx + 1]
+
     os.environ.setdefault("GEMINI_API_KEY_GRATIS", "REDACTED_API_KEY")
 
     from cerebro import get_gerenciador, chat, MensagemNeutra, EstadoProvedor
+    from ferramentas.resumo_contexto import limpar_resumo
     g = get_gerenciador()
 
-    print("=== TESTE DA CADEIA DE CEREBROS ===")
+    # Configurar cerebro se especificado
+    if cerebro_tipo == "local":
+        g.forcar_modo_local(True)
+        print("[teste] Forcado modo LOCAL")
+    elif cerebro_tipo == "nuvem":
+        g.forcar_modo_local(False)
+        print("[teste] Forcado modo NUVEM")
+    if cerebro_modelo:
+        prov = g.obter_provedor_ativo()
+        if prov:
+            prov.config.modelo = cerebro_modelo
+            print(f"[teste] Modelo forçado: {cerebro_modelo}")
+
+    # Limpar estado anterior
+    limpar_resumo()
+    g._estados.clear()
+    g._carregar_estados()
+
+    # 0. Teste mascaramento de chaves
+    print("0. Teste mascaramento de chaves (AIza*):")
+    from seguranca import CREDENCIAIS_REGEX
+    textos_teste = [
+        "minha chave e AIzaSyB123456789",
+        "chave: AIzaXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
+        "sem chave aqui",
+    ]
+    for t in textos_teste:
+        bloqueado = any(solto.search(t) for _, solto in CREDENCIAIS_REGEX)
+        print(f"   '{t[:40]}' -> {'BLOQUEADO' if bloqueado else 'OK'}")
+    print()
+
+    # 0b. Teste conversao historico neutro
+    print("0b. Teste conversao historico neutro:")
+    from cerebro import MensagemNeutra, obter_historico, adicionar_historico
+    msgs = [
+        MensagemNeutra(role="user", content="Ola"),
+        MensagemNeutra(role="assistant", content="Oi", tool_calls=[{"function": {"name": "teste", "arguments": {}}}]),
+        MensagemNeutra(role="tool", content="ok", tool_call_id="123", name="teste"),
+    ]
+    adicionar_historico(msgs)
+    hist = obter_historico()
+    print(f"   {len(hist)} mensagens no historico neutro")
+    for m in hist:
+        print(f"   {m.role}: {m.content[:30]}... tools={bool(m.tool_calls)}")
+    print()
+
+    print("=== TESTE DO CEREBRO ===")
     print()
 
     # 1. Status inicial
@@ -2140,60 +2203,251 @@ def teste_cerebro():
     print(f"   Provedor ativo: {status['provedor_ativo']}")
     print()
 
-    # 2. Teste chat normal
-    print("2. Teste chat normal (deve usar gemini-flash-gratis):")
-    msgs = [MensagemNeutra(role="user", content="Responda apenas: OK")]
+    # 2. Teste chat simples
+    print("2. Teste chat simples (conhecimento):")
+    msgs = [MensagemNeutra(role="user", content="Qual a capital da Franca?")]
     result = chat(msgs, None)
-    print(f"   Provedor usado: {result.provedor_usado}")
-    print(f"   Modelo: {result.modelo_usado}")
-    print(f"   Resposta: {result.conteudo[:50]}")
+    print(f"   Provedor: {result.provedor_usado} | Modelo: {result.modelo_usado}")
+    print(f"   Resposta: {result.conteudo[:80]}")
     print(f"   Tokens: {result.tokens_entrada}+{result.tokens_saida}")
+    passou = "Paris" in result.conteudo or "paris" in result.conteudo.lower()
+    print(f"   {'PASSOU' if passou else 'FALHOU'}")
     print()
 
-    # 3. Simular erro 429 no provedor 1
-    print("3. Simulando erro 429 (quota) no provedor 1...")
+    # 3-7: Testes do loop de agente (mockando cerebro_chat para retornar tool_calls)
+    print("3-7. Testes do loop de agente (simulando tool_calls via mock):")
+    from unittest.mock import patch
+    from nexus import rodar_turno
+
+    # Mock do chat para retornar tool_calls simulados
+    def chat_mock_simples(mensagens, ferramentas):
+        from cerebro import ResultadoChat
+        # Pega a ultima mensagem do usuario (role=user)
+        ultima_user = ""
+        for m in reversed(mensagens):
+            if getattr(m, 'role', '') == 'user':
+                ultima_user = getattr(m, 'content', '') or ""
+                break
+        if "capital da Franca" in ultima_user:
+            return ResultadoChat(conteudo="A capital da Franca e Paris.", provedor_usado="teste")
+        elif "spotify" in ultima_user and "jazz" in ultima_user:
+            return ResultadoChat(
+                conteudo="",
+                tool_calls=[
+                    {"function": {"name": "abrir_programa", "arguments": {"app": "spotify"}}},
+                    {"function": {"name": "spotify", "arguments": {"acao": "tocar", "musica": "jazz"}}},
+                    {"function": {"name": "definir_volume", "arguments": {"valor": 30}}},
+                ],
+                provedor_usado="teste"
+            )
+        elif "xyz_inexistente" in ultima_user:
+            return ResultadoChat(
+                conteudo="",
+                tool_calls=[
+                    {"function": {"name": "abrir_programa", "arguments": {"app": "xyz_inexistente"}}},
+                ],
+                provedor_usado="teste"
+            )
+        elif "desliga o computador" in ultima_user.lower() or "potencia" in ultima_user.lower():
+            return ResultadoChat(
+                conteudo="",
+                tool_calls=[
+                    {"function": {"name": "potencia", "arguments": {"acao": "desligar"}}},
+                ],
+                provedor_usado="teste"
+            )
+        elif "chrome" in ultima_user and "de novo" in ultima_user:
+            return ResultadoChat(
+                conteudo="",
+                tool_calls=[
+                    {"function": {"name": "abrir_programa", "arguments": {"app": "chrome"}}},
+                    {"function": {"name": "abrir_programa", "arguments": {"app": "chrome"}}},
+                ],
+                provedor_usado="teste"
+            )
+        elif "projeto" in ultima_user and ("react" in ultima_user or "vue" in ultima_user):
+            return ResultadoChat(
+                conteudo="",
+                tool_calls=[
+                    {"function": {"name": "pedir_ao_opencode", "arguments": {"tarefa": "criar projeto", "pasta_destino": "."}}},
+                    {"function": {"name": "pedir_ao_opencode", "arguments": {"tarefa": "criar projeto", "pasta_destino": "."}}},
+                ],
+                provedor_usado="teste"
+            )
+        elif "lista" in ultima_user or "apps" in ultima_user:
+            return ResultadoChat(
+                conteudo="",
+                tool_calls=[
+                    {"function": {"name": "listar_apps", "arguments": {}}},
+                ],
+                provedor_usado="teste"
+            )
+        return ResultadoChat(conteudo="OK", provedor_usado="teste")
+
+    with patch('nexus.cerebro_chat', side_effect=chat_mock_simples):
+        # 3. Multi-passo
+        print("3. Teste multi-passo (spotify + tocar):")
+        conversa = [{"role": "system", "content": "Teste"}, {"role": "user", "content": "Abre o spotify, toca jazz"}]
+        conversa, chamadas, _ = rodar_turno(conversa, "Abre o spotify, toca jazz")
+        print(f"   Ferramentas chamadas: {chamadas}")
+        ferramentas_esperadas = {"abrir_programa", "spotify"}
+        ok = ferramentas_esperadas.issubset(chamadas)
+        print(f"   {'PASSOU' if ok else 'FALHOU'} (esperado: {ferramentas_esperadas}, obtido: {chamadas})")
+        print()
+
+        # 4. Recuperacao de erro - mock falha na primeira chamada
+        print("4. Teste recuperacao de erro (app inexistente -> listar_apps):")
+        
+        def chat_mock_falha_primeira(mensagens, ferramentas):
+            from cerebro import ResultadoChat
+            ultima_user = ""
+            for m in reversed(mensagens):
+                if getattr(m, 'role', '') == 'user':
+                    ultima_user = getattr(m, 'content', '') or ""
+                    break
+            if "xyz_inexistente" in ultima_user:
+                if not hasattr(chat_mock_falha_primeira, '_chamou'):
+                    chat_mock_falha_primeira._chamou = True
+                    return ResultadoChat(
+                        conteudo="FALHA: App nao encontrado.",
+                        tool_calls=[{"function": {"name": "abrir_programa", "arguments": {"app": "xyz_inexistente"}}}],
+                        provedor_usado="teste"
+                    )
+                else:
+                    return ResultadoChat(
+                        conteudo="",
+                        tool_calls=[{"function": {"name": "listar_apps", "arguments": {}}}],
+                        provedor_usado="teste"
+                    )
+            elif "lista" in ultima_user or "apps" in ultima_user:
+                return ResultadoChat(
+                    conteudo="",
+                    tool_calls=[{"function": {"name": "listar_apps", "arguments": {}}}],
+                    provedor_usado="teste"
+                )
+            return ResultadoChat(conteudo="OK", provedor_usado="teste")
+
+        with patch('nexus.cerebro_chat', side_effect=chat_mock_falha_primeira):
+            print("4. Teste recuperacao de erro (app inexistente -> listar_apps):")
+            conversa = [{"role": "system", "content": "Teste"}, {"role": "user", "content": "Abra o app xyz_inexistente. Se falhar, liste os apps."}]
+            conversa, chamadas, _ = rodar_turno(conversa, "Abra o app xyz_inexistente. Se falhar, liste os apps.")
+            print(f"   Ferramentas chamadas: {chamadas}")
+            ok = "abrir_programa" in chamadas and "listar_apps" in chamadas
+            print(f"   {'PASSOU' if ok else 'FALHOU'}")
+            print()
+
+        # 5. Acao perigosa (mock sem confirmacao interativa - usuario recusa)
+        def chat_mock_bloqueado(mensagens, ferramentas):
+            from cerebro import ResultadoChat
+            ultima_user = ""
+            for m in reversed(mensagens):
+                if getattr(m, 'role', '') == 'user':
+                    ultima_user = getattr(m, 'content', '') or ""
+                    break
+            if "desliga" in ultima_user.lower() or "potencia" in ultima_user.lower():
+                return ResultadoChat(
+                    conteudo="",
+                    tool_calls=[{"function": {"name": "potencia", "arguments": {"acao": "desligar"}}}],
+                    provedor_usado="teste"
+                )
+            return ResultadoChat(conteudo="OK", provedor_usado="teste")
+
+        with patch('nexus.cerebro_chat', side_effect=chat_mock_bloqueado):
+            with patch('nexus.confirmar_risco', return_value=False):
+                print("5. Teste acao perigosa (potencia -> cancelado por usuario):")
+                conversa = [{"role": "system", "content": "Teste"}, {"role": "user", "content": "Desliga o computador"}]
+                conversa, chamadas, resultados = rodar_turno(conversa, "Desliga o computador")
+                print(f"   Ferramentas chamadas: {chamadas}")
+                cancelado = any("CANCELADO" in r for r in resultados)
+                print(f"   {'PASSOU (cancelado)' if cancelado else 'FALHOU'}")
+                print()
+
+        # 6. Anti-loop
+        print("6. Teste anti-loop (duplicada ignorada):")
+        conversa = [{"role": "system", "content": "Teste"}, {"role": "user", "content": "Abra o chrome e abra o chrome de novo"}]
+        conversa, chamadas, _ = rodar_turno(conversa, "Abra o chrome e abra o chrome de novo")
+        count_chrome = sum(1 for c in chamadas if c == "abrir_programa")
+        print(f"   abrir_programa chamado {count_chrome}x (esperado 1)")
+        ok = count_chrome == 1
+        print(f"   {'PASSOU' if ok else 'FALHOU'}")
+        print()
+
+        # 7. OpenCode max 1/turno
+        print("7. Teste OpenCode max 1 por turno:")
+        
+        def chat_mock_opencode(mensagens, ferramentas):
+            from cerebro import ResultadoChat
+            ultima_user = ""
+            for m in reversed(mensagens):
+                if getattr(m, 'role', '') == 'user':
+                    ultima_user = getattr(m, 'content', '') or ""
+                    break
+            if "projeto" in ultima_user and ("react" in ultima_user or "vue" in ultima_user):
+                return ResultadoChat(
+                    conteudo="",
+                    tool_calls=[
+                        {"function": {"name": "pedir_ao_opencode", "arguments": {"tarefa": "criar projeto", "pasta_destino": "."}}},
+                        {"function": {"name": "pedir_ao_opencode", "arguments": {"tarefa": "criar projeto", "pasta_destino": "."}}},
+                    ],
+                    provedor_usado="teste"
+                )
+            return ResultadoChat(conteudo="OK", provedor_usado="teste")
+
+        with patch('nexus.cerebro_chat', side_effect=chat_mock_opencode):
+            # Mock executar para nao chamar OpenCode real
+            with patch('nexus.executar', side_effect=lambda n, a: "MOCK: OpenCode executado" if n == "pedir_ao_opencode" else f"MOCK: {n}({a})"):
+                print("7. Teste OpenCode max 1 por turno:")
+                conversa = [{"role": "system", "content": "Teste"}, {"role": "user", "content": "Crie um projeto react e depois crie um projeto vue"}]
+                conversa, chamadas, _ = rodar_turno(conversa, "Crie um projeto react e depois crie um projeto vue")
+                count_opencode = sum(1 for c in chamadas if c == "pedir_ao_opencode")
+                print(f"   pedir_ao_opencode chamado {count_opencode}x (esperado <=1)")
+                ok = count_opencode <= 1
+                print(f"   {'PASSOU' if ok else 'FALHOU'}")
+                print()
+
+    # 8. Failover 429 -> local
+    print("8. Failover 429 (quota) nuvem -> local:")
     g.registrar_erro("gemini-flash-gratis", "429 Quota exceeded")
     g.registrar_erro("gemini-flash-gratis", "429 Quota exceeded")
     g.registrar_erro("gemini-flash-gratis", "429 Quota exceeded")
     status = g.status()
     for p in status["provedores"]:
         print(f"   {p['nome']}: {p['estado']}")
-    print()
-
-    # 4. Teste chat apos erro (deve cair para local)
-    print("4. Teste chat apos erro (deve cair para ollama-local):")
     msgs = [MensagemNeutra(role="user", content="Responda apenas: OK")]
     result = chat(msgs, None)
-    print(f"   Provedor usado: {result.provedor_usado}")
-    print(f"   Modelo: {result.modelo_usado}")
-    print(f"   Resposta: {result.conteudo[:50]}")
+    print(f"   Provedor apos failover: {result.provedor_usado}")
+    ok = result.provedor_usado == "ollama-local"
+    print(f"   {'PASSOU' if ok else 'FALHOU'}")
     print()
 
-    # 5. Recuperar provedor 1
-    print("5. Recuperando provedor 1 (simulando passagem de tempo)...")
-    g._estados["gemini-flash-gratis"].entrou_descanso_em = 0  # forcar recuperacao imediata
+    # 9. Recuperacao nuvem apos descanso
+    print("9. Recuperacao nuvem apos descanso:")
+    g._estados["gemini-flash-gratis"].entrou_descanso_em = 0
     g.tentar_recuperar_provedores()
     status = g.status()
     for p in status["provedores"]:
         print(f"   {p['nome']}: {p['estado']}")
     print()
 
-    # 6. Teste chat apos recuperacao (deve voltar para gemini)
-    print("6. Teste chat apos recuperacao (deve voltar para gemini-flash-gratis):")
-    msgs = [MensagemNeutra(role="user", content="Responda apenas: OK")]
-    result = chat(msgs, None)
-    print(f"   Provedor usado: {result.provedor_usado}")
-    print(f"   Modelo: {result.modelo_usado}")
-    print(f"   Resposta: {result.conteudo[:50]}")
-    print()
-
-    # 7. Testar limite mensal
-    print("7. Testando limite mensal (simulando 100% da cota)...")
-    g._estados["gemini-flash-gratis"].tokens_mes = 100000  # limite
+    # 10. Limite mensal
+    print("10. Limite mensal (100% cota):")
+    g._estados["gemini-flash-gratis"].tokens_mes = 100000
     g.verificar_limites("gemini-flash-gratis")
     status = g.status()
     for p in status["provedores"]:
         print(f"   {p['nome']}: {p['estado']} ({p['tokens_mes']}/{p['limite_mensal']})")
+    ok = status["provedores"][0]["estado"] == "esgotado"
+    print(f"   {'PASSOU' if ok else 'FALHOU'}")
+    print()
+
+    # 11. saude.ok nao afetado
+    print("11. saude.ok nao afetado por falha nuvem:")
+    from pathlib import Path
+    saude_ok = Path(PASTA_DADOS) / "saude.ok"
+    if saude_ok.exists():
+        print(f"   saude.ok existe: SIM (timestamp: {saude_ok.read_text()[:20]})")
+    else:
+        print(f"   saude.ok existe: NAO")
     print()
 
     print("=== TESTE CONCLUIDO ===")

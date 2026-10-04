@@ -6,7 +6,11 @@ import subprocess
 from comum import esquema
 
 NOME = "copiar_clipboard"
-DESCRICAO = "Copia um texto para a area de transferencia."
+DESCRICAO = (
+    "COPIA TEXTO para a area de transferencia (ctrl+C). "
+    "Use para 'copia isso', 'copiar texto', 'coloca no clipboard'. "
+    "NAO ABRE apps - para abrir whatsapp/spotify/code use 'abrir_programa'."
+)
 PARAMETROS = esquema(
     {"texto": {"type": "string", "description": "Texto a copiar"}},
     ["texto"],

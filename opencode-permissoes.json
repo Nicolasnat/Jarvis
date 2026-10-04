@@ -25,7 +25,10 @@
       "/lib64/**": "deny",
       "/proc/**": "deny",
       "/sys/**": "deny",
-      "/dev/**": "deny"
+      "/dev/**": "deny",
+      "config/gemini.json": "deny",
+      "config/cerebro.json": "deny",
+      "dados/uso_cerebro.json": "deny"
     },
     "edit": {
       "*": "allow",
@@ -45,7 +48,10 @@
       "/lib64/**": "deny",
       "/proc/**": "deny",
       "/sys/**": "deny",
-      "/dev/**": "deny"
+      "/dev/**": "deny",
+      "config/gemini.json": "deny",
+      "config/cerebro.json": "deny",
+      "dados/uso_cerebro.json": "deny"
     },
     "bash": {
       "*": "allow",
@@ -88,6 +94,7 @@
       "cat *auth.json*": "deny",
       "cat ~/.config/opencode/*": "deny",
       "cat ~/.docker/config.json": "deny",
+      "cat *gemini.json*": "deny",
       "history -c*": "deny",
       "shred *": "deny",
       "wipe *": "deny",
@@ -122,7 +129,10 @@
       "/lib64/**": "deny",
       "/proc/**": "deny",
       "/sys/**": "deny",
-      "/dev/**": "deny"
+      "/dev/**": "deny",
+      "config/gemini.json": "deny",
+      "config/cerebro.json": "deny",
+      "dados/uso_cerebro.json": "deny"
     }
   }
 }

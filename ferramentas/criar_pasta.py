@@ -3,8 +3,11 @@ from comum import resolver, esquema, permitido_para_escrita
 
 NOME = "criar_pasta"
 DESCRICAO = (
-    "Cria apenas um diretorio vazio. NAO use para criar projetos: "
-    "isso e responsabilidade do pedir_ao_opencode."
+    "CRIA um NOVO diretorio VAZIO. "
+    "Use SOMENTE quando o usuario pedir para CRIAR uma pasta nova "
+    "(ex.: 'criar pasta nova', 'nova pasta'). "
+    "NAO use para abrir pasta existente - use 'abrir_vscode' ou 'abrir_pasta'. "
+    "NAO use para criar projetos completos - use 'pedir_ao_opencode'."
 )
 PARAMETROS = esquema(
     {"caminho": {"type": "string", "description": "Nome ou caminho da pasta"}},
