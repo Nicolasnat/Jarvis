@@ -768,7 +768,9 @@ def _gate_seguranca(meta: dict, argumentos: dict):
 def executar(nome: str, argumentos: dict) -> str:
     if _ponte:
         _ponte_emitir("ferramenta_iniciada", nome, argumentos or {})
-        _definir_estado("executando")
+        # O handler em interface/app.py ja chama definir_estado("executando", acao_texto)
+        # com o texto da acao (ex: "ABRINDO SPOTIFY..."), entao nao chamamos aqui
+        # para nao sobrescrever.
 
     funcao = FERRAMENTAS.get(nome)
     if funcao is None:
