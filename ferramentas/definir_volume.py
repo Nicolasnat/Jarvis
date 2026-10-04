@@ -1,4 +1,5 @@
 """Plugin: define o volume do sistema (0 a 100)."""
+import re
 import subprocess
 
 from comum import esquema
@@ -11,6 +12,21 @@ PARAMETROS = esquema(
 )
 BINARIO = "pactl"
 SEGURANCA = "detectar"
+
+
+def volume_atual():
+    """Volume atual do sink padrao (0-100), ou None se nao der para ler."""
+    try:
+        resultado = subprocess.run(
+            ["pactl", "get-sink-volume", "@DEFAULT_SINK@"],
+            capture_output=True, text=True, timeout=10,
+        )
+    except Exception:  # noqa: BLE001 - sem pactl/audio, so nao ha leitura
+        return None
+    if resultado.returncode != 0:
+        return None
+    achado = re.search(r"(\d+)%", resultado.stdout)
+    return int(achado.group(1)) if achado else None
 
 
 def funcao(nivel: int):

@@ -19,6 +19,7 @@ from comum import (
     limpar_ansi, resumir_busca, memoria_para_prompt, chave_nome,
 )
 from ferramentas.carregador import carregar_plugins
+from ferramentas import definir_volume as _volume_sistema
 from ferramentas._agenda import iniciar as iniciar_agenda
 
 
@@ -1028,22 +1029,108 @@ def _ajustar_spotify(argumentos, texto):
     return argumentos
 
 
-def _corrigir_volume(nome, argumentos, texto):
-    """Desempata o volume: do sistema por padrao, do Spotify so se citado.
+_RE_VOL_CRESCER = re.compile(r"\b(aument\w*|sobe|subir|levanta\w*|mais alto)\b")
+_RE_VOL_BAIXAR = re.compile(r"\b(abaix\w*|diminu\w*|desce|descer|baixa\w*|menos|mais baixo)\b")
+_RE_VOL_PORCENTO = re.compile(r"(\d{1,3})\s*(?:%|por cento)")
+_RE_VOL_ALVO = re.compile(r"\b(?:para|pro|pra|no|na|de)\s+(\d{1,3})\b")
+_RE_VOL_DELTA = re.compile(r"\b(?:em|mais|menos)\s+(\d{1,3})\b")
+_RE_VOL_DEFINE = re.compile(r"\b(coloca\w*|bota\w*|poe|poem|deixa\w*|define|definir|muda\w*)\b")
+_RE_VOL_NUM = re.compile(r"\b(\d{1,3})\b")
+_RE_VOL_MAX = re.compile(r"\b(m[áa]ximo|max|tudo|cheio)\b")
+_RE_VOL_MUDO = re.compile(r"\b(mudo|mutad\w*|sem som|silencio|silêncio)\b")
 
-    O modelo decide isso por conta propria e erra; a fala e a fonte da verdade.
+
+def _vol_ok(numero) -> bool:
+    try:
+        return 0 <= int(numero) <= 100
+    except (TypeError, ValueError):
+        return False
+
+
+def _nivel_pedido(texto):
+    """Le o volume pedido na fala: ('absoluto', n), ('passo', d) ou None.
+
+    Preferimos a fala ao modelo porque ele arredonda e inventa numeros. 'para
+    20' e alvo; 'aumenta 10'/'em 10' e passo; sem numero, o passo e 10.
     """
+    t = (texto or "").lower()
+    cresce = bool(_RE_VOL_CRESCER.search(t))
+    baixa = bool(_RE_VOL_BAIXAR.search(t))
+
+    achado = _RE_VOL_PORCENTO.search(t)
+    if achado and _vol_ok(achado.group(1)):
+        return "absoluto", int(achado.group(1))
+
+    if cresce or baixa:
+        achado = _RE_VOL_DELTA.search(t)
+        if achado and _vol_ok(achado.group(1)):
+            passo = int(achado.group(1))
+            return "passo", (passo if cresce else -passo)
+        achado = _RE_VOL_ALVO.search(t)
+        if achado and _vol_ok(achado.group(1)):
+            return "absoluto", int(achado.group(1))
+        achado = _RE_VOL_NUM.search(t)
+        if achado and _vol_ok(achado.group(1)):
+            passo = int(achado.group(1))
+            return "passo", (passo if cresce else -passo)
+        return "passo", (10 if cresce else -10)
+
+    achado = _RE_VOL_ALVO.search(t)
+    if achado and _vol_ok(achado.group(1)):
+        return "absoluto", int(achado.group(1))
+
+    if _RE_VOL_DEFINE.search(t) or "volume" in t:
+        achado = _RE_VOL_NUM.search(t)
+        if achado and _vol_ok(achado.group(1)):
+            return "absoluto", int(achado.group(1))
+
+    if _RE_VOL_MAX.search(t):
+        return "absoluto", 100
+    if _RE_VOL_MUDO.search(t):
+        return "absoluto", 0
+    return None
+
+
+def _corrigir_volume(nome, argumentos, texto):
+    """Decide volume do sistema x Spotify e fixa o nivel pedido na fala.
+
+    O modelo erra o roteamento e arredonda o numero; a fala e a fonte da
+    verdade. 'aumenta/abaixa o volume' sem citar o Spotify e o volume do
+    sistema; so 'volume do Spotify' mexe no Spotify.
+    """
+    acao = (argumentos.get("acao") or "").lower()
+    volume_spotify = nome == "spotify" and acao == "volume"
+    if nome != "definir_volume" and not volume_spotify:
+        return nome, argumentos
+
     baixo = (texto or "").lower()
     tem_spotify = "spotify" in baixo
-    if nome == "spotify" and (argumentos.get("acao") or "").lower() == "volume":
-        # Sem citar o Spotify, 'aumenta o volume' e o volume do notebook. Sem
-        # valor e so uma consulta: deixamos no Spotify para nao quebrar.
-        if tem_spotify or argumentos.get("valor") is None:
-            return nome, argumentos
-        return "definir_volume", {"nivel": argumentos.get("valor")}
+    # O sistema e o padrao; o Spotify so quando o usuario cita a palavra. Uma
+    # consulta (sem valor) fica onde o modelo pediu.
+    destino = "spotify" if (volume_spotify and (tem_spotify or argumentos.get("valor") is None)) else "sistema"
     if nome == "definir_volume" and tem_spotify:
-        return "spotify", {"acao": "volume", "valor": argumentos.get("nivel")}
-    return nome, argumentos
+        destino = "spotify"
+
+    pedido = _nivel_pedido(texto)
+    if pedido is not None:
+        tipo, valor = pedido
+        if tipo == "passo":
+            if destino == "sistema":
+                atual = _volume_sistema.volume_atual()
+                valor = None if atual is None else max(0, min(100, atual + valor))
+            else:
+                valor = None  # sem leitura do Spotify, deixa o modelo
+        if valor is not None:
+            if destino == "spotify":
+                return "spotify", {"acao": "volume", "valor": valor}
+            return "definir_volume", {"nivel": valor}
+
+    if destino == "spotify":
+        if volume_spotify:
+            return nome, argumentos
+        valor = argumentos.get("valor")
+        return "spotify", {"acao": "volume"} if valor is None else {"acao": "volume", "valor": valor}
+    return "definir_volume", {"nivel": argumentos.get("nivel") or argumentos.get("valor")}
 
 
 def _resposta_quebrada(texto) -> bool:
