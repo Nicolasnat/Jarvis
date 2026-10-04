@@ -7,7 +7,7 @@
   "wake_debug": false,
   "barge_limiar": 0.008,
   "barge_fator": 2.5,
-  "barge_limiar_falando": 0.03,
-  "barge_fator_falando": 8.0,
+  "barge_limiar_falando": 0.012,
+  "barge_fator_falando": 3.0,
   "barge_duracao": 0.45
 }

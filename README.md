@@ -115,8 +115,9 @@ Pacotes de sistema (opcionais) estão listados em [`INSTALACAO.md`](INSTALACAO.m
 
 ## ▶️ Uso
 
-Há dois jeitos de conversar com o Nexus: **digitando** (modo texto) ou **falando**
-(modo voz). Nos dois, o Ollama precisa estar rodando (`ollama serve`).
+Há três jeitos de conversar com o Nexus: **digitando** (modo texto), **falando**
+(modo voz) ou **digitando e ouvindo a resposta** (modo escrita). Em todos, o
+Ollama precisa estar rodando (`ollama serve`).
 
 ### Digitando (modo texto)
 
@@ -144,6 +145,16 @@ estiver rolando.
 > microfone, veja `config/voz.json` e `ajustar_microfone.sh`.
 
 > A voz usa o Piper (modelo `pt_BR-faber-medium`, baixado uma vez conforme [`INSTALACAO.md`](INSTALACAO.md)). Se o modelo não estiver presente, cai para `espeak-ng`/`spd-say`.
+
+### Digitando e ouvindo a resposta
+
+```bash
+./venv/bin/python nexus.py --escrever
+```
+
+Você **digita** (mais preciso que a transcrição de voz) e o Nexus **responde em
+voz** pelo Piper — bom com fones de ouvido ou quando o teclado está longe do
+microfone. `--texto-voz` é um apelido para o mesmo modo.
 
 ### Rodando em segundo plano (sem terminal)
 
