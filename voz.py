@@ -154,6 +154,9 @@ _evento_parada = threading.Event()
 _evento_fim_vigia = threading.Event()
 _lock_vigia = threading.Lock()
 _vigia = None
+NIVEL_ESCALA = 25.0
+_nivel_callback = None
+_reproduzindo_fala = threading.Event()
 
 # Quantas partes do codigo estao com o microfone aberto ao mesmo tempo. Dois
 # 'arecord' disputando o mesmo dispositivo nao e garantia de nada: um deles
@@ -360,6 +363,28 @@ def limpar_parada() -> None:
     _evento_parada.clear()
 
 
+def ao_nivel(fn):
+    """Registra callback para monitoramento do nivel de audio (0.0 a 1.0)."""
+    global _nivel_callback
+    _nivel_callback = fn
+
+
+def _emitir_nivel(valor: float) -> None:
+    """Dispara o callback de nivel registrado de forma segura."""
+    cb = _nivel_callback
+    if cb is None:
+        return
+    try:
+        cb(float(valor))
+    except Exception:
+        pass
+
+
+def _normalizar_nivel(rms: float) -> float:
+    """Normaliza RMS para a escala de 0.0 a 1.0."""
+    return min(1.0, max(0.0, float(rms) * NIVEL_ESCALA))
+
+
 def _nivel(amostras):
     """RMS de um array int16, na mesma escala usada pelo wakeword e pela VAD."""
     import numpy as np
@@ -367,6 +392,60 @@ def _nivel(amostras):
     if amostras.size == 0:
         return 0.0
     return float(np.sqrt((amostras.astype(np.float32) / 32768.0).__pow__(2).mean()))
+
+
+def _emitir_envelope_wav(caminho_wav, evento_fim):
+    """Calcula e emite o envelope RMS do arquivo WAV em tempo real."""
+    import numpy as np
+
+    _reproduzindo_fala.set()
+    try:
+        with wave.open(str(caminho_wav), "rb") as wf:
+            taxa = wf.getframerate()
+            canais = wf.getnchannels()
+            largura = wf.getsampwidth()
+            n_frames = wf.getnframes()
+            if taxa <= 0 or n_frames <= 0:
+                return
+            dados = wf.readframes(n_frames)
+
+        if largura == 2:
+            amostras = np.frombuffer(dados, dtype=np.int16)
+        elif largura == 1:
+            amostras = (np.frombuffer(dados, dtype=np.uint8).astype(np.int16) - 128) * 256
+        else:
+            return
+
+        if canais > 1:
+            amostras = amostras[::canais]
+
+        # Blocos de ~50 ms
+        tamanho_bloco = max(1, int(taxa * 0.05))
+        duracao_bloco = float(tamanho_bloco) / taxa
+        blocos = [amostras[i:i + tamanho_bloco] for i in range(0, len(amostras), tamanho_bloco)]
+        niveis = [_nivel(pedaco) for pedaco in blocos]
+        # Normaliza pelo pico da propria fala: sem isso o orbe fica saturado
+        # durante toda a resposta em vez de ondular com as silabas.
+        pico = max(niveis) if niveis else 0.0
+        fator = (1.0 / pico) if pico > 1e-6 else 0.0
+
+        for nivel in niveis:
+            if evento_fim.is_set() or _evento_parada.is_set():
+                break
+            t_inicio = time.time()
+            _emitir_nivel(min(1.0, nivel * fator))
+
+            tempo_espera = duracao_bloco - (time.time() - t_inicio)
+            if tempo_espera > 0:
+                if evento_fim.wait(timeout=tempo_espera) or _evento_parada.is_set():
+                    break
+            elif evento_fim.is_set() or _evento_parada.is_set():
+                break
+    except Exception:
+        pass
+    finally:
+        _reproduzindo_fala.clear()
+        _emitir_nivel(0.0)
 
 
 def _vigia_corpo(limiar, duracao, fator):
@@ -403,6 +482,8 @@ def _vigia_corpo(limiar, duracao, fator):
 
             amostras = np.frombuffer(dados, dtype=np.int16)
             rms = _nivel(amostras)
+            if _nivel_callback is not None and not _reproduzindo_fala.is_set():
+                _emitir_nivel(_normalizar_nivel(rms))
 
             # Fala continua, e nao um estalo ou o barulho de uma cadeira.
             if rms >= alvo:
@@ -416,6 +497,8 @@ def _vigia_corpo(limiar, duracao, fator):
         print(f"[voz] Vigia de interrupcao parou ({erro}).", flush=True)
     finally:
         _encerrar_microfone(processo)
+        if not _reproduzindo_fala.is_set():
+            _emitir_nivel(0.0)
 
 
 def vigiar_interrupcao(limiar=None, fator=None) -> bool:
@@ -502,8 +585,22 @@ def falar(texto: str, vigiar: bool = True):
                         voz.synthesize_wav(texto, wav, syn_config=_config_sintese())
                     if LIBERAR_PIPER_APOS_FALAR:
                         descarregar(fala=False, piper=True)
-                    if _tocar(arquivo):
-                        return
+                    fim_reproducao = threading.Event()
+                    thread_nivel = None
+                    if _nivel_callback is not None:
+                        thread_nivel = threading.Thread(
+                            target=_emitir_envelope_wav,
+                            args=(arquivo, fim_reproducao),
+                            daemon=True,
+                        )
+                        thread_nivel.start()
+                    try:
+                        if _tocar(arquivo):
+                            return
+                    finally:
+                        fim_reproducao.set()
+                        if thread_nivel is not None:
+                            thread_nivel.join(timeout=0.2)
                 except Exception as erro:
                     print(f"[voz] Piper falhou ({erro}); usando espeak.")
             comando = _comando_fala()
@@ -748,7 +845,11 @@ def gravar_ate_silencio(destino: Path, segundos=DURACAO_FALA, espera_silencio=0.
 
                 amostras += bloco
 
-                if _rms(bloco) > limiar:
+                rms_bloco = _rms(bloco)
+                if _nivel_callback is not None:
+                    _emitir_nivel(_normalizar_nivel(rms_bloco))
+
+                if rms_bloco > limiar:
                     falando = True
                     silencio = 0.0
                 elif falando:
@@ -760,6 +861,7 @@ def gravar_ate_silencio(destino: Path, segundos=DURACAO_FALA, espera_silencio=0.
                     break
     finally:
         _encerrar_microfone(proc)
+        _emitir_nivel(0.0)
 
     with wave.open(str(destino), "wb") as wav:
         wav.setnchannels(1)

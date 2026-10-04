@@ -16,6 +16,9 @@ Antigravity planeja e revisa. Tudo roda offline no terminal ou como serviço
 - `nexus.py` — aplicação principal: loop de conversa, roteamento de intenção,
   segurança, delegação e modo voz.
 - `voz.py` — wakeword, transcrição (faster-whisper), fala (Piper) e barge-in.
+- `interface/` — interface gráfica PySide6: `app.py` (instância única + Qt),
+  `janela_principal.py`, `ponte.py` (sinais Qt, inclui confirmação bloqueante)
+  e `popups/` (um popup por ferramenta). Ativa com `--interface`.
 - `comum.py` — constantes e helpers compartilhados.
 - `ferramentas/` — plugins carregados automaticamente.
 - `config/` — configuração editável (`apps.json`, `voz.json`, `spotify.json`).
@@ -39,10 +42,11 @@ Antigravity planeja e revisa. Tudo roda offline no terminal ou como serviço
 ## Comandos
 
 ```bash
-./venv/bin/python nexus.py            # modo texto
-./venv/bin/python nexus.py --voz      # modo voz
-./venv/bin/python -m py_compile nexus.py voz.py comum.py ferramentas/*.py
-./instalar_servico.sh                 # instala/reinicia o serviço nexus.service
+./venv/bin/python nexus.py               # modo texto
+./venv/bin/python nexus.py --voz         # modo voz
+./venv/bin/python nexus.py --interface   # interface gráfica (voz + texto)
+./venv/bin/python -m py_compile nexus.py voz.py comum.py ferramentas/*.py interface/*.py interface/popups/*.py
+./instalar_servico.sh                    # instala/reinicia o serviço nexus.service
 systemctl --user restart nexus.service
 journalctl --user -u nexus.service -f
 ```
@@ -54,7 +58,9 @@ journalctl --user -u nexus.service -f
   foi construído contra o plano). Nenhum dos dois escreve credenciais ou mexe
   fora da pasta de trabalho.
 - Preserve os gates de segurança de `nexus.py` (`detectar_graves`,
-  `confirmar_risco`, `CAMINHOS_PROIBIDOS`).
+  `confirmar_risco`, `CAMINHOS_PROIBIDOS`). Com `--interface`, `confirmar_risco`
+  usa o popup de confirmação via `_ponte.pedir_confirmacao_bloqueante` (com
+  timeout); sem interface, continua pedindo `sim` no terminal.
 
 ## Estilo de código
 

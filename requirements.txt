@@ -9,3 +9,4 @@ piper-tts
 chromadb
 pypdf
 python-docx
+PySide6
