@@ -20,7 +20,6 @@ from comum import (
 )
 from ferramentas.carregador import carregar_plugins
 from ferramentas._agenda import iniciar as iniciar_agenda
-from ferramentas import _spotify
 
 
 MODELO = "llama3.1:8b"
@@ -820,7 +819,8 @@ SUA DIVISAO DE TRABALHO (obrigatoria):
 6. MEMORIA: quando o usuario pedir para voce lembrar de algo (preferencias, dados pessoais, senhas nao), chame 'lembrar_fato'. Se a resposta estiver na secao de memoria do sistema, use-a. Use 'buscar_memoria'/'esquecer_fato' quando fizer sentido.
 7. RECADOS E TAREFAS: para "me lembra daqui a X" use 'agendar_lembrete'; para listas de afazeres use 'adicionar_tarefa'/'listar_tarefas'/'concluir_tarefa'; para anotar algo solto use 'anotar'.
 8. SISTEMA: use 'status_sistema' para CPU/RAM/disco; 'abrir_programa' e 'fechar_programa' apenas com nomes da lista permitida; 'definir_volume', 'definir_brilho', 'ler_clipboard' e 'copiar_clipboard' para o restante.
-9. DOCUMENTOS: use 'indexar_documentos' para carregar arquivos/pastas (txt, md, pdf, docx) e 'perguntar_documentos' para responder perguntas com base nesse conteudo. Se a pergunta for sobre um documento que o usuario citou, indexe antes de perguntar.
+9. SPOTIFY: tocar musica/playlist e os controles (pausar, retomar, proxima, anterior, volume, 'o que esta tocando') sao SEMPRE a ferramenta 'spotify', com a 'acao' certa. Nunca use 'abrir_programa' para controlar o Spotify.
+10. DOCUMENTOS: use 'indexar_documentos' para carregar arquivos/pastas (txt, md, pdf, docx) e 'perguntar_documentos' para responder perguntas com base nesse conteudo. Se a pergunta for sobre um documento que o usuario citou, indexe antes de perguntar.
 
 ANTI-ALUCINACAO (obrigatoria):
 - Nunca afirme que fez algo sem antes ter chamado a ferramenta correspondente.
@@ -987,6 +987,22 @@ PLACEHOLDERS_SPOTIFY = {
     "nome da playlist", "musica", "playlist", "sua playlist", "a playlist",
 }
 
+# Ferramentas cujo retorno ja e a resposta pronta para o usuario (confirmacao,
+# status, lista). O llama3.1 costuma reescrever isso errado depois de executar
+# a ferramenta ('NUNCA afirmei que toquei...'), entao quando todas as
+# ferramentas do passo sao destas usamos o retorno delas sem passar de novo
+# pelo modelo. As ferramentas de conhecimento (qwen, web, documentos) e de
+# delegacao continuam sendo resumidas pelo modelo.
+RESPOSTA_DIRETA = {
+    "spotify", "abrir_pasta", "abrir_programa", "abrir_vscode", "fechar_programa",
+    "definir_volume", "definir_brilho", "criar_pasta", "copiar_clipboard",
+    "ler_clipboard", "lembrar_fato", "esquecer_fato", "buscar_memoria",
+    "agendar_lembrete", "cancelar_lembrete", "listar_lembretes",
+    "adicionar_tarefa", "concluir_tarefa", "listar_tarefas", "anotar",
+    "status_sistema", "listar_apps", "descobrir_apps", "listar_projetos",
+    "indexar_documentos",
+}
+
 
 def _ajustar_spotify(argumentos, texto):
     """Conserta o nome que o modelo passa para o Spotify.
@@ -1000,10 +1016,14 @@ def _ajustar_spotify(argumentos, texto):
         return argumentos
     musica = str(argumentos.get("musica") or "").strip()
     chave_musica = chave_nome(musica)
+    # Pedido de playlist: passa a fala inteira para o plugin, que le as playlists
+    # do usuario e escolhe a de nome mais parecido. Sem isso o modelo reduz
+    # 'toque a playlist do afim' para 'do afim' e o plugin procuraria uma faixa.
+    if any(m in (texto or "").lower() for m in _MARCADORES_COLECAO):
+        return {**argumentos, "musica": texto}
     if chave_musica and chave_musica in chave_nome(texto or ""):
         return argumentos
-    tem_colecao = any(m in (texto or "").lower() for m in _MARCADORES_COLECAO)
-    if tem_colecao or not chave_musica or chave_musica in PLACEHOLDERS_SPOTIFY:
+    if not chave_musica or chave_musica in PLACEHOLDERS_SPOTIFY:
         return {**argumentos, "musica": texto}
     return argumentos
 
@@ -1031,6 +1051,7 @@ def rodar_turno(conversa, texto: str):
             # A resposta final e impressa (e falada) por quem chamou.
             break
 
+        nomes_passo, resultados_passo = [], []
         for pedido in mensagem.get("tool_calls"):
             nome = pedido["function"]["name"]
             argumentos = pedido["function"].get("arguments") or {}
@@ -1062,10 +1083,18 @@ def rodar_turno(conversa, texto: str):
             if resultado[:5] in {"FALHA", "Erro ", "BLOQ"}:
                 print(f"   x {resultado[:300]}", flush=True)
             conversa.append({"role": "tool", "content": str(resultado)})
+            nomes_passo.append(nome)
+            resultados_passo.append(str(resultado))
 
             if _interrompido():
                 print("[nexus] Interrompido: parando o turno aqui.", flush=True)
                 return conversa, chamadas
+
+        if nomes_passo and all(n in RESPOSTA_DIRETA for n in nomes_passo):
+            # O retorno ja e a resposta: fala direto, sem outra ida ao modelo
+            # (que costuma deturpar o que a ferramenta devolveu).
+            conversa.append({"role": "assistant", "content": "\n".join(resultados_passo)})
+            break
     return conversa, chamadas
 
 
@@ -1102,6 +1131,14 @@ def extrair_resposta(conversa) -> str:
     return ""
 
 
+def ultimo_resultado(conversa) -> str:
+    """Ultimo retorno de ferramenta, usado quando o modelo nao resume nada."""
+    for mensagem in reversed(conversa):
+        if mensagem.get("role") == "tool" and mensagem.get("content"):
+            return str(mensagem["content"])
+    return ""
+
+
 def resposta_falada(texto: str) -> str:
     """Limpa a resposta antes de falar.
 
@@ -1111,6 +1148,8 @@ def resposta_falada(texto: str) -> str:
     curto e natural.
     """
     limpo = (texto or "").strip()
+    if not limpo:
+        return ""
     if limpo[:1] in ("{", "["):
         try:
             dados = json.loads(limpo)
@@ -1124,12 +1163,11 @@ def resposta_falada(texto: str) -> str:
             return "Feito."
         if isinstance(dados, list):
             return "Feito."
-        if dados is None:
-            # JSON quebrado (o modelo as vezes corta no meio). Pelo menos
-            # aproveita a mensagem, se houver.
-            achado = re.search(r'"message"\s*:\s*"([^"]+)"', limpo)
-            return achado.group(1).strip() if achado else "Feito."
-    return limpo.strip("`").strip() or "Feito."
+        # JSON quebrado (o modelo as vezes corta no meio). Aproveita a mensagem
+        # se houver; se for uma tentativa falha de tool call, nao ha o que falar.
+        achado = re.search(r'"message"\s*:\s*"([^"]+)"', limpo)
+        return achado.group(1).strip() if achado else ""
+    return limpo.strip("`").strip()
 
 
 def _quer_parar(texto: str) -> bool:
@@ -1286,10 +1324,7 @@ def rodar_modo_voz(conversa, servico=False):
             voz.falar("Certo, parei.")
             continue
 
-        conversa[0]["content"] = (
-            REGRAS + memoria_para_prompt() + apps_para_prompt()
-            + _spotify.playlists_para_prompt()
-        )
+        conversa[0]["content"] = REGRAS + memoria_para_prompt() + apps_para_prompt()
         conversa.append({"role": "user", "content": texto})
         global ULTIMO_PEDIDO
         ULTIMO_PEDIDO = texto
@@ -1314,13 +1349,17 @@ def rodar_modo_voz(conversa, servico=False):
             continue
 
         resposta = resposta_falada(extrair_resposta(conversa))
-        if resposta:
-            print(f"\nNexus: {resposta}")
-            # falar() abre a propria escuta com o limiar alto e se cala no
-            # instante em que voce falar por cima.
-            voz.falar(resposta)
-            if voz.interrompido():
-                print("[voz] Fala interrompida.", flush=True)
+        if not resposta:
+            # Modelo pequeno as vezes nao resume o que a ferramenta devolveu.
+            resposta = resposta_falada(ultimo_resultado(conversa))
+        if not resposta:
+            resposta = "Nao entendi. Pode repetir?"
+        print(f"\nNexus: {resposta}")
+        # falar() abre a propria escuta com o limiar alto e se cala no
+        # instante em que voce falar por cima.
+        voz.falar(resposta)
+        if voz.interrompido():
+            print("[voz] Fala interrompida.", flush=True)
         voz.descarregar()
 
 
@@ -1384,10 +1423,7 @@ def main():
             break
 
         # Injeta a memoria relevante no prompt do sistema antes de cada turno.
-        conversa[0]["content"] = (
-            REGRAS + memoria_para_prompt() + apps_para_prompt()
-            + _spotify.playlists_para_prompt()
-        )
+        conversa[0]["content"] = REGRAS + memoria_para_prompt() + apps_para_prompt()
         conversa.append({"role": "user", "content": texto})
         global ULTIMO_PEDIDO
         ULTIMO_PEDIDO = texto
@@ -1395,8 +1431,9 @@ def main():
             conversa, chamadas = rodar_turno(conversa, texto)
             garantir_opencode(conversa, texto, chamadas)
             resposta = resposta_falada(extrair_resposta(conversa))
-            if resposta:
-                print(f"\nNexus: {resposta}")
+            if not resposta:
+                resposta = resposta_falada(ultimo_resultado(conversa))
+            print(f"\nNexus: {resposta or 'Nao entendi. Pode repetir?'}")
         except KeyboardInterrupt:
             print("\nInterrompido.")
         except Exception as erro:
