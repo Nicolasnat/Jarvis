@@ -115,19 +115,33 @@ Pacotes de sistema (opcionais) estão listados em [`INSTALACAO.md`](INSTALACAO.m
 
 ## ▶️ Uso
 
-Com o Ollama rodando (`ollama serve`):
+Há dois jeitos de conversar com o Nexus: **digitando** (modo texto) ou **falando**
+(modo voz). Nos dois, o Ollama precisa estar rodando (`ollama serve`).
+
+### Digitando (modo texto)
 
 ```bash
-# Modo texto (padrão)
-python nexus.py
-
-# Modo voz: diga "Nexus" (ou "Hey Nexus") para falar; Ctrl+C encerra
-python nexus.py --voz
+./venv/bin/python nexus.py
 ```
 
-> A wakeword é **"Nexus"** (valem também "Hey Nexus", "Oi Nexus" e "Nexus iniciar"): o reconhecimento é por palavras-chave (Vosk), então basta dizer "Nexus". As frases aceitas ficam em `config/voz.json` (`wake_frases`) e o modelo é baixado uma vez conforme [`INSTALACAO.md`](INSTALACAO.md).
->
-> A qualquer momento — respondendo, tocando música ou com um agente de código no meio de uma tarefa — é só falar para interromper: um simples "para" já cancela. Veja [`INSTALACAO.md`](INSTALACAO.md) para calibrar o microfone em `config/voz.json`.
+Digite o pedido e tecle Enter; `sair` (ou Ctrl+D) encerra. Neste modo não há
+microfone nem fala.
+
+### Falando (modo voz)
+
+```bash
+./venv/bin/python nexus.py --voz
+```
+
+Diga **"Nexus"** (valem também "Hey Nexus", "Oi Nexus" e "Nexus iniciar") e
+espere o "Ouvindo.". Depois é só dizer o comando — não precisa repetir "Nexus".
+Fale por cima a qualquer momento para interromper; um "para" cancela o que
+estiver rolando.
+
+> A wakeword é reconhecida por palavras-chave (Vosk), então não precisa de
+> treino. As frases aceitas ficam em `config/voz.json` (`wake_frases`) e o modelo
+> é baixado uma vez conforme [`INSTALACAO.md`](INSTALACAO.md). Para calibrar o
+> microfone, veja `config/voz.json` e `ajustar_microfone.sh`.
 
 > A voz usa o Piper (modelo `pt_BR-faber-medium`, baixado uma vez conforme [`INSTALACAO.md`](INSTALACAO.md)). Se o modelo não estiver presente, cai para `espeak-ng`/`spd-say`.
 
@@ -149,6 +163,11 @@ systemctl --user stop nexus       # parar agora
 systemctl --user start nexus      # iniciar de novo
 systemctl --user disable --now nexus   # remover do login
 ```
+
+> O serviço roda **só no modo voz**: não há terminal para digitar. Para usar o
+> modo texto, pare o serviço (`systemctl --user stop nexus`) e rode
+> `./venv/bin/python nexus.py`. Em segundo plano, para ver o que ele ouviu e
+> respondeu, acompanhe o `journalctl` acima.
 
 > **Memória sob controle**: em repouso, só o detector de wakeword fica carregado
 > (~230 MB). Os modelos pesados (Whisper, ~570 MB, e Piper) são carregados sob
