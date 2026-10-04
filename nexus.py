@@ -20,6 +20,7 @@ from comum import (
 )
 from ferramentas.carregador import carregar_plugins
 from ferramentas._agenda import iniciar as iniciar_agenda
+from ferramentas import _spotify
 
 
 MODELO = "llama3.1:8b"
@@ -979,6 +980,34 @@ CORTESIA_PARAR = {
 }
 
 
+_MARCADORES_COLECAO = ("playlist", "playlists", "album", "álbum", "lista")
+
+PLACEHOLDERS_SPOTIFY = {
+    "minha playlist x", "playlist x", "x", "nome", "nome da musica",
+    "nome da playlist", "musica", "playlist", "sua playlist", "a playlist",
+}
+
+
+def _ajustar_spotify(argumentos, texto):
+    """Conserta o nome que o modelo passa para o Spotify.
+
+    Modelos pequenos resumem o pedido e chegam a inventar um placeholder
+    ('minha playlist X') em vez do nome falado. Quando a fala pede uma playlist
+    (ou o argumento e um placeholder), usamos a propria transcricao, que contem
+    o nome real; caso contrario mantemos o argumento do modelo.
+    """
+    if not isinstance(argumentos, dict) or (argumentos.get("acao") or "").lower() != "tocar":
+        return argumentos
+    musica = str(argumentos.get("musica") or "").strip()
+    chave_musica = chave_nome(musica)
+    if chave_musica and chave_musica in chave_nome(texto or ""):
+        return argumentos
+    tem_colecao = any(m in (texto or "").lower() for m in _MARCADORES_COLECAO)
+    if tem_colecao or not chave_musica or chave_musica in PLACEHOLDERS_SPOTIFY:
+        return {**argumentos, "musica": texto}
+    return argumentos
+
+
 def rodar_turno(conversa, texto: str):
     chamadas = set()
     # Modelos pequenos repetem a mesma ferramenta no mesmo turno (o Spotify foi
@@ -1005,6 +1034,8 @@ def rodar_turno(conversa, texto: str):
         for pedido in mensagem.get("tool_calls"):
             nome = pedido["function"]["name"]
             argumentos = pedido["function"].get("arguments") or {}
+            if nome == "spotify":
+                argumentos = _ajustar_spotify(argumentos, texto)
             print(f"\n[nexus] executando {nome}({argumentos})...", flush=True)
 
             chave = _chave_chamada(nome, argumentos)
@@ -1093,6 +1124,11 @@ def resposta_falada(texto: str) -> str:
             return "Feito."
         if isinstance(dados, list):
             return "Feito."
+        if dados is None:
+            # JSON quebrado (o modelo as vezes corta no meio). Pelo menos
+            # aproveita a mensagem, se houver.
+            achado = re.search(r'"message"\s*:\s*"([^"]+)"', limpo)
+            return achado.group(1).strip() if achado else "Feito."
     return limpo.strip("`").strip() or "Feito."
 
 
@@ -1250,7 +1286,10 @@ def rodar_modo_voz(conversa, servico=False):
             voz.falar("Certo, parei.")
             continue
 
-        conversa[0]["content"] = REGRAS + memoria_para_prompt() + apps_para_prompt()
+        conversa[0]["content"] = (
+            REGRAS + memoria_para_prompt() + apps_para_prompt()
+            + _spotify.playlists_para_prompt()
+        )
         conversa.append({"role": "user", "content": texto})
         global ULTIMO_PEDIDO
         ULTIMO_PEDIDO = texto
@@ -1345,7 +1384,10 @@ def main():
             break
 
         # Injeta a memoria relevante no prompt do sistema antes de cada turno.
-        conversa[0]["content"] = REGRAS + memoria_para_prompt() + apps_para_prompt()
+        conversa[0]["content"] = (
+            REGRAS + memoria_para_prompt() + apps_para_prompt()
+            + _spotify.playlists_para_prompt()
+        )
         conversa.append({"role": "user", "content": texto})
         global ULTIMO_PEDIDO
         ULTIMO_PEDIDO = texto

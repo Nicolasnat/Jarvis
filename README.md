@@ -269,7 +269,7 @@ Nexus/
 | `status_sistema` | CPU, RAM, disco, uptime e bateria |
 | `abrir_programa` / `fechar_programa` | Abre/fecha programas da lista permitida |
 | `descobrir_apps` / `listar_apps` | Escaneia os apps instalados e lista os disponíveis |
-| `spotify` | Toca música pelo nome, pausar, próxima, volume *(exige Spotify Premium)* |
+| `spotify` | Toca música ou playlist pelo nome (casa a playlist mais parecida), pausar, próxima, volume *(exige Spotify Premium)* |
 | `definir_volume` | Volume do sistema (0–100) |
 | `definir_brilho` | Brilho da tela (requer `brightnessctl`) *(opcional)* |
 | `ler_clipboard` / `copiar_clipboard` | Área de transferência |
