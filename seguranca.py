@@ -18,7 +18,7 @@ CAMINHOS_PROIBIDOS = [
     "~/.ssh/**", "~/.aws/**", "~/.gnupg/**", "~/.kube/**",
     "~/.config/opencode/**", "~/.config/gh/**", "~/.docker/config.json",
     "/etc/**", "/usr/**", "/bin/**", "/sbin/**", "/boot/**", "/lib/**", "/lib64/**",
-    "/proc/**", "/sys/**", "/dev/**",
+    "/proc/**", "/sys/**", "/dev/**", "config/gemini.json", "config/cerebro.json", "dados/uso_cerebro.json"
 ]
 
 # Destruicao do sistema, do disco ou vazamento de credenciais. O OpenCode bloqueia
@@ -34,7 +34,7 @@ BLOQUEIOS = [
     "chmod -R 777 /*", "chmod 777 /*", "chown -R * /*", "chown * /*",
     ":(){:|:&};:",
     "cat ~/.ssh*", "cat ~/.aws*", "cat ~/.gnupg*", "cat *auth.json*",
-    "cat ~/.config/opencode/*", "cat ~/.docker/config.json",
+    "cat ~/.config/opencode/*", "cat ~/.docker/config.json", "cat *gemini.json*",
     "history -c*", "shred *", "wipe *",
 ]
 
@@ -42,7 +42,7 @@ BLOQUEIOS = [
 CREDENCIAIS = [
     "*.ssh*", "*.aws*", "*.gnupg*", "*.netrc*", "*/.kube/*",
     "*id_rsa*", "*id_ed25519*", "*auth.json*",
-    "*.docker/config.json*", "*.config/opencode/*",
+    "*.docker/config.json*", "*.config/opencode/*", "*gemini.json*", "AIza*"
 ]
 
 # Coisas destrutivas ou irreversiveis, mas legitimas em contexto. O Nexus pergunta
@@ -262,3 +262,37 @@ def confiar_no_workspace(caminho: Path = PASTA_TRABALHO) -> None:
     if alvo not in confiaveis:
         confiaveis.append(alvo)
         SETTINGS_ANTIGRAVITY.write_text(json.dumps(dados, indent=2) + "\n")
+
+
+def salvar_chave_gemini(chave: str, nome_ref: str = "GEMINI_API_KEY_GRATIS") -> Path:
+    """Salva a chave da API Gemini em config/gemini.json com permissao 600."""
+    from comum import BASE_PROJETO
+    arquivo = BASE_PROJETO / "config" / "gemini.json"
+    arquivo.parent.mkdir(parents=True, exist_ok=True)
+    dados = {}
+    if arquivo.exists():
+        try:
+            dados = json.loads(arquivo.read_text())
+        except (json.JSONDecodeError, OSError):
+            dados = {}
+    dados[nome_ref] = chave
+    # Escreve com permissao 600 (apenas dono le/escrita)
+    arquivo.write_text(json.dumps(dados, indent=2, ensure_ascii=False))
+    try:
+        os.chmod(arquivo, 0o600)
+    except OSError:
+        pass
+    return arquivo
+
+
+def ler_chave_gemini(nome_ref: str = "GEMINI_API_KEY_GRATIS") -> str:
+    """Le a chave da API Gemini do config/gemini.json."""
+    from comum import BASE_PROJETO
+    arquivo = BASE_PROJETO / "config" / "gemini.json"
+    if not arquivo.exists():
+        return ""
+    try:
+        dados = json.loads(arquivo.read_text())
+        return dados.get(nome_ref, "")
+    except (json.JSONDecodeError, OSError):
+        return ""

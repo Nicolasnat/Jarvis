@@ -2,6 +2,9 @@
   "protegidos": [
     "seguranca.py",
     "config/protegidos.json",
+    "config/gemini.json",
+    "config/cerebro.json",
+    "dados/uso_cerebro.json",
     "opencode-permissoes.json",
     "nexus.service",
     "instalar_servico.sh",

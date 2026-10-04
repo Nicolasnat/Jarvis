@@ -11,8 +11,6 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-import ollama
-
 from comum import (
     PASTA_TRABALHO, PASTA_DADOS, PASTA_CONFIG, BASE_PROJETO,
     MODELO_ESPECIALISTA, resolver, esquema, TEXTO,
@@ -22,9 +20,16 @@ from ferramentas.carregador import carregar_plugins
 from ferramentas import definir_volume as _volume_sistema
 from ferramentas._agenda import iniciar as iniciar_agenda
 import seguranca
+from cerebro import (
+    chat as cerebro_chat,
+    adicionar_historico,
+    obter_historico,
+    limpar_historico,
+    status_cerebros,
+    MensagemNeutra,
+    ResultadoChat,
+)
 
-
-MODELO = "llama3.1:8b"
 
 TEMPO_PADRAO = 120
 TEMPO_CODIGO = 900
@@ -660,18 +665,18 @@ def montar_tarefa_opencode(pedido: str, pasta: Path, plano: str = "") -> str:
                     "Escreva o prompt de execucao para o OpenCode implementar esse plano.")
 
     try:
-        r = ollama.chat(
-            model=MODELO,
-            messages=[
-                {"role": "system", "content": (
-                    "Voce traduz um pedido do usuario em um prompt de execucao para o OpenCode. "
-                    "Responda APENAS com o prompt final, em portugues, no imperativo, no maximo 8 linhas. "
-                    "Sem cercas de codigo, sem comentarios sobre a traducao."
-                )},
-                {"role": "user", "content": contexto},
-            ],
-        )
-        tarefa = r["message"]["content"].strip().strip("`").strip()
+        mensagens = [
+            MensagemNeutra(role="system", content=(
+                "Voce traduz um pedido do usuario em um prompt de execucao para o OpenCode. "
+                "Responda APENAS com o prompt final, em portugues, no imperativo, no maximo 8 linhas. "
+                "Sem cercas de codigo, sem comentarios sobre a traducao."
+            )),
+            MensagemNeutra(role="user", content=contexto),
+        ]
+        resultado = cerebro_chat(mensagens, None)
+        if resultado.erro:
+            raise Exception(resultado.erro)
+        tarefa = resultado.conteudo.strip().strip("`").strip()
     except Exception:
         tarefa = pedido
 
@@ -725,6 +730,7 @@ ALIAS_ARGUMENTOS = {
     "instrucao": "tarefa", "prompt": "tarefa", "comando": "tarefa",
     "descricao": "tarefa", "pergunta": "pergunta", "termo": "busca",
     "programa": "app", "aplicativo": "app", "aplicacao": "app",
+    "nome": "app",
 }
 
 
@@ -1064,17 +1070,29 @@ def _resposta_quebrada(texto) -> bool:
 
 
 def _chamar_modelo(conversa, tentativas=3):
-    """Chama o Ollama; insiste se vier um tool call quebrado ou resposta vazia."""
-    mensagem = {"content": ""}
+    """Chama o cerebro ativo; insiste se vier um tool call quebrado ou resposta vazia."""
+    mensagens_neutras = []
+    for m in conversa:
+        if m.get("role") in ("system", "user", "assistant", "tool"):
+            msg = MensagemNeutra(role=m["role"], content=m.get("content") or "")
+            if m.get("tool_calls"):
+                msg.tool_calls = m["tool_calls"]
+            if m.get("tool_call_id"):
+                msg.tool_call_id = m["tool_call_id"]
+            if m.get("name"):
+                msg.name = m["name"]
+            mensagens_neutras.append(msg)
+
     for _ in range(tentativas):
-        r = ollama.chat(model=MODELO, messages=podar(conversa), tools=MANUAL)
-        mensagem = r["message"]
-        if mensagem.get("tool_calls"):
-            return mensagem
-        conteudo = (mensagem.get("content") or "").strip()
+        resultado = cerebro_chat(mensagens_neutras, MANUAL)
+        if resultado.erro:
+            continue
+        if resultado.tool_calls:
+            return {"role": "assistant", "content": resultado.conteudo, "tool_calls": resultado.tool_calls}
+        conteudo = (resultado.conteudo or "").strip()
         if conteudo and not _resposta_quebrada(conteudo):
-            return mensagem
-    return mensagem
+            return {"role": "assistant", "content": conteudo}
+    return {"role": "assistant", "content": ""}
 
 
 def rodar_turno(conversa, texto: str):
@@ -1107,6 +1125,11 @@ def rodar_turno(conversa, texto: str):
         for pedido in mensagem.get("tool_calls"):
             nome = pedido["function"]["name"]
             argumentos = pedido["function"].get("arguments") or {}
+            # Alguns modelos (llama3.1) aninham o function call dentro de arguments
+            # {"function": {"name": "x", "arguments": {"function": "...", "parameters": {...}}}}
+            if isinstance(argumentos, dict) and "function" in argumentos and "parameters" in argumentos:
+                nome = argumentos["function"]
+                argumentos = argumentos["parameters"]
             if nome == "spotify":
                 argumentos = _ajustar_spotify(argumentos, texto)
             nome, argumentos = _corrigir_volume(nome, argumentos, texto)
@@ -1172,9 +1195,20 @@ def garantir_opencode(conversa, texto: str, chamadas: set) -> set:
         abrir = executar("abrir_vscode", {"caminho": pasta})
         conversa.append({"role": "tool", "content": str(abrir)})
 
-    r = ollama.chat(model=MODELO, messages=podar(conversa))
-    if r["message"].get("content"):
-        conversa.append(r["message"])
+    mensagens = []
+    for m in podar(conversa):
+        if m.get("role") in ("system", "user", "assistant", "tool"):
+            msg = MensagemNeutra(role=m["role"], content=m.get("content") or "")
+            if m.get("tool_calls"):
+                msg.tool_calls = m["tool_calls"]
+            if m.get("tool_call_id"):
+                msg.tool_call_id = m["tool_call_id"]
+            if m.get("name"):
+                msg.name = m["name"]
+            mensagens.append(msg)
+    resultado = cerebro_chat(mensagens, None)
+    if resultado.conteudo:
+        conversa.append({"role": "assistant", "content": resultado.conteudo})
     return chamadas | {"pedir_ao_opencode"}
 
 
@@ -1283,20 +1317,19 @@ SISTEMA_AVISO = (
 
 
 def _gerar_avisos_ollama(quantidade=6):
-    """Gera um lote de saudacoes curtas com a Ollama, fora do caminho critico."""
+    """Gera um lote de saudacoes curtas com o cerebro ativo, fora do caminho critico."""
     if _gerando_avisos.is_set():
         return
     _gerando_avisos.set()
     try:
-        resposta = ollama.chat(
-            model=MODELO,
-            messages=[
-                {"role": "system", "content": SISTEMA_AVISO},
-                {"role": "user", "content": f"Gere {quantidade} saudacoes curtas e diferentes, uma por linha."},
-            ],
-            options={"temperature": 1.1, "num_predict": 80},
-        )
-        conteudo = (resposta.get("message") or {}).get("content") or ""
+        mensagens = [
+            MensagemNeutra(role="system", content=SISTEMA_AVISO),
+            MensagemNeutra(role="user", content=f"Gere {quantidade} saudacoes curtas e diferentes, uma por linha."),
+        ]
+        resultado = cerebro_chat(mensagens, None)
+        if resultado.erro:
+            return
+        conteudo = resultado.conteudo or ""
         novas = []
         for linha in conteudo.splitlines():
             linha = linha.strip().strip("\"'").lstrip("-*0123456789. ").strip()
@@ -1304,7 +1337,7 @@ def _gerar_avisos_ollama(quantidade=6):
                 novas.append(linha)
         with _avisos_lock:
             _avisos.extend(novas[:quantidade])
-    except Exception:  # noqa: BLE001 - Ollama fora do ar nao pode travar a voz
+    except Exception:
         pass
     finally:
         _gerando_avisos.clear()
@@ -1460,14 +1493,19 @@ def rodar_modo_voz(conversa, servico=False):
 
 def _anunciar_status():
     try:
-        ollama.chat(model=MODELO, messages=[{"role": "user", "content": "ping"}])
+        mensagens = [MensagemNeutra(role="user", content="ping")]
+        resultado = cerebro_chat(mensagens, None)
+        if resultado.erro:
+            raise Exception(resultado.erro)
+        status = status_cerebros()
+        provedor = status.get("provedor_ativo", "desconhecido")
         arquiteto = f"Antigravity ({MODELO_ARQUITETO})" if AGY else "indisponivel"
-        print(f"Nexus online. Cerebro: {MODELO} | Especialista: {MODELO_ESPECIALISTA} | Codigo: OpenCode")
+        print(f"Nexus online. Cerebro ativo: {provedor} | Especialista: {MODELO_ESPECIALISTA} | Codigo: OpenCode")
         print(f"Arquiteto: {arquiteto} | Executor: {MODELO_EXECUTOR}")
         print(f"Projetos: {PASTA_TRABALHO}")
         print("Digite 'sair' para encerrar.\n")
     except Exception as erro:
-        print(f"Nao consegui falar com o Ollama ({erro}). Ele esta rodando? Inicie com 'ollama serve'.\n")
+        print(f"Nao consegui falar com o cerebro ({erro}). Verifique se o Ollama esta rodando ('ollama serve').\n")
 
 
 def conduzir_texto(conversa, texto):
@@ -1558,7 +1596,7 @@ def autoteste() -> int:
     # 1. py_compile em todos os .py
     print("\n[1/6] py_compile...")
     arquivos_py = (
-        [BASE / "nexus.py", BASE / "voz.py", BASE / "comum.py", BASE / "seguranca.py"] +
+        [BASE / "nexus.py", BASE / "voz.py", BASE / "comum.py", BASE / "seguranca.py", BASE / "cerebro.py"] +
         list(PASTA_FERRAMENTAS.glob("*.py")) +
         list(PASTA_INTERFACE.glob("*.py")) +
         list(PASTA_POPUPS.glob("*.py"))
@@ -1703,6 +1741,296 @@ def autoteste() -> int:
     return 0 if falhas == 0 else 1
 
 
+def configurar_cerebro():
+    """Wizard interativo para configurar a cadeia de cerebros (Gemini + Ollama)."""
+    import os
+    import sys
+
+    def ler_chave(prompt: str) -> str:
+        """Le chave do stdin (nao oculta se nao for TTY)."""
+        try:
+            import getpass
+            if sys.stdin.isatty():
+                return getpass.getpass(prompt).strip()
+        except Exception:
+            pass
+        try:
+            return input(prompt).strip()
+        except EOFError:
+            return ""
+
+    print("=== CONFIGURACAO DO CEREBRO NEXUS ===")
+    print()
+    print("O Nexus usa uma CADEIA DE CEREBROS com fallback automatico:")
+    print("  1) nuvem_pago   - Gemini classe 'pro' (projeto COM faturamento/creditos)")
+    print("  2) nuvem_gratis - Gemini classe 'flash' (projeto SEM faturamento)")
+    print("  3) local        - Ollama (como hoje, sempre disponivel)")
+    print()
+    print("POR QUE DUAS CHAVES? Os limites do Gemini valem POR PROJETO no Google Cloud.")
+    print("Um projeto com faturamento (pago) tem limites altos; um sem faturamento (gratis)")
+    print("tem limites baixos. Usando dois projetos diferentes na MESMA conta Google,")
+    print("voce tem ambos os pools de cota. O Nexus tenta o pago, cai pro gratis,")
+    print("e por fim pro local.")
+    print()
+    print("COMO CRIAR AS CHAVES:")
+    print("  1. Acesse https://aistudio.google.com/apikey")
+    print("  2. Clique 'Create API key' -> escolha 'Create API key in new project'")
+    print("  3. Para a chave PAGA: crie/vincule uma conta de faturamento no Cloud Billing")
+    print("     (resgate creditos do Google Developer Program em developers.google.com/program/my-benefits)")
+    print("  4. Para a chave GRATIS: crie em outro projeto SEM faturamento")
+    print("  5. Use UMA UNICA conta Google e SO esses dois projetos")
+    print("     (os termos do Google proibem criar contas/projetos em serie para escapar de limites)")
+    print()
+    print("Configure as variaveis de ambiente ou digite as chaves abaixo.")
+    print("Deixe em branco para pular (a cadeia funciona com as que existirem).")
+    print()
+
+    # Chave paga
+    chave_pago = os.environ.get("GEMINI_API_KEY_PAGO", "")
+    if not chave_pago:
+        print("Chave PAGA (nuvem_pago) - projeto COM faturamento:")
+        chave_pago = ler_chave("  Cole a chave (Enter para pular): ")
+    else:
+        print(f"Chave PAGA ja configurada via GEMINI_API_KEY_PAGO ({chave_pago[:10]}...)")
+
+    # Chave gratis
+    chave_gratis = os.environ.get("GEMINI_API_KEY_GRATIS", "")
+    if not chave_gratis:
+        print("\nChave GRATIS (nuvem_gratis) - projeto SEM faturamento:")
+        chave_gratis = ler_chave("  Cole a chave (Enter para pular): ")
+    else:
+        print(f"\nChave GRATIS ja configurada via GEMINI_API_KEY_GRATIS ({chave_gratis[:10]}...)")
+
+    # Validar e listar modelos
+    from cerebro import CerebroGemini, ConfigProvedor, TipoProvedor
+
+    def testar_chave(nome, chave, tipo):
+        if not chave:
+            print(f"  {nome}: PULADA")
+            return None
+        os.environ[f"GEMINI_API_KEY_{nome.upper()}"] = chave
+        cfg = ConfigProvedor(nome=f"gemini-{nome}", tipo=tipo, modelo="", chave_ref=f"GEMINI_API_KEY_{nome.upper()}")
+        cerebro = CerebroGemini(cfg)
+        print(f"  {nome}: Validando chave e listando modelos...")
+        modelos = cerebro.listar_modelos()
+        if not modelos:
+            print(f"  {nome}: FALHA - nao conseguiu listar modelos (chave invalida ou sem internet)")
+            return None
+        print(f"  {nome}: {len(modelos)} modelos com generateContent")
+
+        # Filtrar modelos estaveis (sem preview, lite, image, transcribe, omni, tts, nano, banana)
+        def eh_estavel(m):
+            ml = m.lower()
+            return not any(x in ml for x in ["preview", "lite", "image", "transcribe", "omni", "tts", "nano", "banana", "audio"])
+
+        modelos_estaveis = [m for m in modelos if eh_estavel(m)]
+        if not modelos_estaveis:
+            modelos_estaveis = modelos  # fallback
+
+        # Agrupar por classe
+        pro = [m for m in modelos_estaveis if "pro" in m.lower() and "flash" not in m.lower()]
+        flash = [m for m in modelos_estaveis if "flash" in m.lower()]
+
+        if pro:
+            print(f"    Pro:   {', '.join(pro[:5])}{'...' if len(pro) > 5 else ''}")
+        if flash:
+            print(f"    Flash: {', '.join(flash[:5])}{'...' if len(flash) > 5 else ''}")
+
+        # Sugerir o mais recente estavel (maior numero de versao)
+        def extrair_versao(m):
+            import re
+            nums = re.findall(r'(\d+(?:\.\d+)*)', m)
+            return [int(n) for n in nums[0].split('.')] if nums else [0]
+
+        sugerido = None
+        if tipo == TipoProvedor.NUVEM_PAGO and pro:
+            sugerido = max(pro, key=extrair_versao)
+        elif tipo == TipoProvedor.NUVEM_GRATIS and flash:
+            sugerido = max(flash, key=extrair_versao)
+        elif pro:
+            sugerido = max(pro, key=extrair_versao)
+        elif flash:
+            sugerido = max(flash, key=extrair_versao)
+        elif modelos_estaveis:
+            sugerido = modelos_estaveis[0]
+
+        if sugerido:
+            print(f"  {nome}: Testando function calling com '{sugerido}'...")
+            cfg.modelo = sugerido
+            if cerebro.testar_function_calling():
+                print(f"  {nome}: OK - function calling funciona")
+                return sugerido
+            else:
+                print(f"  {nome}: AVISO - function calling nao funcionou com '{sugerido}', tentando outros...")
+                # Tentar outros modelos da mesma classe
+                candidatos = pro if "pro" in sugerido.lower() else flash
+                for m in sorted(candidatos, key=extrair_versao, reverse=True):
+                    if m == sugerido:
+                        continue
+                    print(f"  {nome}: Tentando '{m}'...")
+                    cfg.modelo = m
+                    if cerebro.testar_function_calling():
+                        print(f"  {nome}: OK - function calling funciona com '{m}'")
+                        return m
+                print(f"  {nome}: FALHA - function calling nao funcionou em nenhum modelo")
+                return sugerido
+        return None
+
+    print("\n--- Testando chaves ---")
+    modelo_pago = testar_chave("pago", chave_pago, TipoProvedor.NUVEM_PAGO) if chave_pago else None
+    modelo_gratis = testar_chave("gratis", chave_gratis, TipoProvedor.NUVEM_GRATIS) if chave_gratis else None
+
+    # Salvar chaves em config/gemini.json
+    if chave_pago or chave_gratis:
+        from seguranca import salvar_chave_gemini
+    if chave_pago:
+        salvar_chave_gemini(chave_pago, "GEMINI_API_KEY_PAGO")
+        print(f"[OK] Chave PAGA salva em config/gemini.json (permissao 600)")
+    if chave_gratis:
+        salvar_chave_gemini(chave_gratis, "GEMINI_API_KEY_GRATIS")
+        print(f"[OK] Chave GRATIS salva em config/gemini.json (permissao 600)")
+
+    from comum import BASE_PROJETO, PASTA_DADOS, salvar_json
+    import json
+    dados = {"provedores": []}
+
+    if modelo_pago:
+        from seguranca import salvar_chave_gemini
+        salvar_chave_gemini(chave_pago, "GEMINI_API_KEY_PAGO")
+        print(f"[OK] Chave PAGA salva em config/gemini.json (permissao 600)")
+    if chave_gratis:
+        from seguranca import salvar_chave_gemini
+        salvar_chave_gemini(chave_gratis, "GEMINI_API_KEY_GRATIS")
+        print(f"[OK] Chave GRATIS salva em config/gemini.json (permissao 600)")
+
+    if modelo_pago:
+        dados["provedores"].append({
+            "nome": "gemini-pro-pago",
+            "tipo": "nuvem_pago",
+            "modelo": modelo_pago,
+            "chave_ref": "GEMINI_API_KEY_PAGO",
+            "limite_mensal_tokens": 1000000,
+            "ativo": True,
+            "prioridade": 1,
+        })
+        print(f"[OK] nuvem_pago configurado: {modelo_pago}")
+    else:
+        print("\n[PULADO] nuvem_pago")
+
+    if modelo_gratis:
+        dados["provedores"].append({
+            "nome": "gemini-flash-gratis",
+            "tipo": "nuvem_gratis",
+            "modelo": modelo_gratis,
+            "chave_ref": "GEMINI_API_KEY_GRATIS",
+            "limite_mensal_tokens": 100000,
+            "ativo": True,
+            "prioridade": 2,
+        })
+        print(f"[OK] nuvem_gratis configurado: {modelo_gratis}")
+    else:
+        print("[PULADO] nuvem_gratis")
+
+    # Sempre manter o local
+    dados["provedores"].append({
+        "nome": "ollama-local",
+        "tipo": "local",
+        "modelo": "llama3.1:8b",
+        "chave_ref": "",
+        "limite_mensal_tokens": 0,
+        "ativo": True,
+        "prioridade": 3,
+    })
+    print("[OK] local mantido: llama3.1:8b")
+
+    arquivo = PASTA_DADOS / "cerebro.json"
+    arquivo.parent.mkdir(parents=True, exist_ok=True)
+    arquivo.write_text(json.dumps(dados, indent=2, ensure_ascii=False))
+    print(f"Configuracao de cadeia salva em {arquivo}")
+    print("Reinicie o Nexus para aplicar.")
+
+    return 0
+
+
+def teste_cerebro():
+    """Testa a cadeia de cerebros simulando falhas e failover."""
+    import os
+    os.environ.setdefault("GEMINI_API_KEY_GRATIS", "REDACTED_API_KEY")
+
+    from cerebro import get_gerenciador, chat, MensagemNeutra, EstadoProvedor
+    g = get_gerenciador()
+
+    print("=== TESTE DA CADEIA DE CEREBROS ===")
+    print()
+
+    # 1. Status inicial
+    print("1. Status inicial:")
+    status = g.status()
+    for p in status["provedores"]:
+        print(f"   {p['nome']} ({p['tipo']}): {p['estado']} - modelo: {p['modelo']}")
+    print(f"   Provedor ativo: {status['provedor_ativo']}")
+    print()
+
+    # 2. Teste chat normal
+    print("2. Teste chat normal (deve usar gemini-flash-gratis):")
+    msgs = [MensagemNeutra(role="user", content="Responda apenas: OK")]
+    result = chat(msgs, None)
+    print(f"   Provedor usado: {result.provedor_usado}")
+    print(f"   Modelo: {result.modelo_usado}")
+    print(f"   Resposta: {result.conteudo[:50]}")
+    print(f"   Tokens: {result.tokens_entrada}+{result.tokens_saida}")
+    print()
+
+    # 3. Simular erro 429 no provedor 1
+    print("3. Simulando erro 429 (quota) no provedor 1...")
+    g.registrar_erro("gemini-flash-gratis", "429 Quota exceeded")
+    g.registrar_erro("gemini-flash-gratis", "429 Quota exceeded")
+    g.registrar_erro("gemini-flash-gratis", "429 Quota exceeded")
+    status = g.status()
+    for p in status["provedores"]:
+        print(f"   {p['nome']}: {p['estado']}")
+    print()
+
+    # 4. Teste chat apos erro (deve cair para local)
+    print("4. Teste chat apos erro (deve cair para ollama-local):")
+    msgs = [MensagemNeutra(role="user", content="Responda apenas: OK")]
+    result = chat(msgs, None)
+    print(f"   Provedor usado: {result.provedor_usado}")
+    print(f"   Modelo: {result.modelo_usado}")
+    print(f"   Resposta: {result.conteudo[:50]}")
+    print()
+
+    # 5. Recuperar provedor 1
+    print("5. Recuperando provedor 1 (simulando passagem de tempo)...")
+    g._estados["gemini-flash-gratis"].entrou_descanso_em = 0  # forcar recuperacao imediata
+    g.tentar_recuperar_provedores()
+    status = g.status()
+    for p in status["provedores"]:
+        print(f"   {p['nome']}: {p['estado']}")
+    print()
+
+    # 6. Teste chat apos recuperacao (deve voltar para gemini)
+    print("6. Teste chat apos recuperacao (deve voltar para gemini-flash-gratis):")
+    msgs = [MensagemNeutra(role="user", content="Responda apenas: OK")]
+    result = chat(msgs, None)
+    print(f"   Provedor usado: {result.provedor_usado}")
+    print(f"   Modelo: {result.modelo_usado}")
+    print(f"   Resposta: {result.conteudo[:50]}")
+    print()
+
+    # 7. Testar limite mensal
+    print("7. Testando limite mensal (simulando 100% da cota)...")
+    g._estados["gemini-flash-gratis"].tokens_mes = 100000  # limite
+    g.verificar_limites("gemini-flash-gratis")
+    status = g.status()
+    for p in status["provedores"]:
+        print(f"   {p['nome']}: {p['estado']} ({p['tokens_mes']}/{p['limite_mensal']})")
+    print()
+
+    print("=== TESTE CONCLUIDO ===")
+    return 0
+
+
 def main():
     if "--help" in sys.argv or "-h" in sys.argv:
         print("Uso: python nexus.py [opcoes]")
@@ -1715,8 +2043,16 @@ def main():
         print("  --texto-voz       Apelido para --escrever")
         print("  --demo-acoes      Simula sequencia de acoes rapidas na interface")
         print("  --autoteste       Executa testes automatizados (sem Ollama, sem microfone, sem dados/)")
+        print("  --configurar-cerebro  Configura a cadeia de cerebros (chaves Gemini, modelos)")
+        print("  --teste-cerebro   Testa a cadeia de cerebros (failover, limites, recuperacao)")
         print("  --help, -h        Mostra esta ajuda")
         return 0
+
+    if "--configurar-cerebro" in sys.argv:
+        return configurar_cerebro()
+
+    if "--teste-cerebro" in sys.argv:
+        return teste_cerebro()
 
     if "--autoteste" in sys.argv:
         return autoteste()
