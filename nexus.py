@@ -1417,6 +1417,11 @@ def rodar_modo_voz(conversa, servico=False):
             print("[voz] Fala interrompida.", flush=True)
         voz.descarregar()
         _definir_estado("ocioso")
+        # Health check para vigia do auto-aprimoramento
+        try:
+            (PASTA_DADOS / "saude.ok").write_text(str(time.time()))
+        except Exception:
+            pass
 
 
 def _anunciar_status():
@@ -1445,6 +1450,11 @@ def conduzir_texto(conversa, texto):
         resposta = resposta_falada("\n".join(resultados_turno))
     _ponte_emitir("resposta_final", resposta)
     _definir_estado("ocioso")
+    # Health check para vigia do auto-aprimoramento
+    try:
+        (PASTA_DADOS / "saude.ok").write_text(str(time.time()))
+    except Exception:
+        pass
     return conversa, resposta
 
 
