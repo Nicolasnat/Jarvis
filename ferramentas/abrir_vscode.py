@@ -4,9 +4,13 @@ import subprocess
 from comum import resolver, esquema
 
 NOME = "abrir_vscode"
-DESCRICAO = "Abre uma pasta no Visual Studio Code. Use DEPOIS que o OpenCode terminar de criar o projeto."
+DESCRICAO = (
+    "Abre uma pasta no Visual Studio Code. Use sempre que o usuario pedir "
+    "para abrir o VS Code, o editor, ou o code em uma pasta especifica. "
+    "Ex.: 'abre o vscode na pasta meu-projeto', 'abrir vscode aqui'."
+)
 PARAMETROS = esquema(
-    {"caminho": {"type": "string", "description": "Pasta a abrir. Use '.' para a pasta raiz."}},
+    {"caminho": {"type": "string", "description": "Nome ou caminho da pasta a abrir (ex.: 'meu-projeto', 'sistema interno', '.')."}},
     ["caminho"],
 )
 BINARIO = "code"
