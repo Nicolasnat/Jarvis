@@ -46,10 +46,11 @@ ESCOPOS = " ".join([
 class ErroSpotify(Exception):
     """Erro com mensagem ja pronta para o usuario ler."""
 
-    def __init__(self, mensagem, reconectar=False):
+    def __init__(self, mensagem, reconectar=False, codigo=None):
         super().__init__(mensagem)
         self.mensagem = mensagem
         self.reconectar = reconectar
+        self.codigo = codigo
 
 
 def _pedido(metodo, url, token=None, dados=None, corpo=None):
@@ -74,13 +75,18 @@ def _pedido(metodo, url, token=None, dados=None, corpo=None):
         except Exception:
             pass
         if erro.code == 401:
-            raise ErroSpotify("A autorizacao do Spotify expirou.", reconectar=True) from erro
+            raise ErroSpotify("A autorizacao do Spotify expirou.", reconectar=True, codigo=401) from erro
         if erro.code == 403:
             raise ErroSpotify(
                 "O Spotify recusou a acao (403). Tocar pelo Web API e usar o "
-                "dispositivo ativo exige Spotify Premium."
+                "dispositivo ativo exige Spotify Premium.", codigo=403,
             ) from erro
-        raise ErroSpotify(f"Spotify respondeu {erro.code}: {detalhe or erro.reason}") from erro
+        if erro.code == 404 and "active device" in detalhe.lower():
+            raise ErroSpotify(
+                "Nenhum aparelho do Spotify estava ativo. Abra o Spotify no "
+                "computador e tente de novo.", codigo=404,
+            ) from erro
+        raise ErroSpotify(f"Spotify respondeu {erro.code}: {detalhe or erro.reason}", codigo=erro.code) from erro
     except urllib.error.URLError as erro:
         raise ErroSpotify(f"Nao consegui falar com o Spotify: {erro.reason}") from erro
 
@@ -461,11 +467,30 @@ def _escolher_dispositivo(lista, pedido=None):
     )
 
 
+def _ativar(dispositivo_id):
+    """Transfere o player para o aparelho, acordando-o.
+
+    A API recusa 'play' com 404 'No active device' quando o aparelho esta na
+    lista mas ocioso (Spotify aberto sem tocar). Transferir para ele primeiro
+    o torna ativo.
+    """
+    _pedido("PUT", API + "/me/player", token=token(), corpo={"device_ids": [dispositivo_id]})
+
+
+def _executar_play(corpo):
+    """Manda tocar; se o aparelho nao estiver ativo, ativa e tenta uma vez."""
+    try:
+        _pedido("PUT", API + "/me/player/play", token=token(), corpo=corpo)
+    except ErroSpotify as erro:
+        if erro.codigo != 404:
+            raise
+        _ativar(corpo["device_id"])
+        _pedido("PUT", API + "/me/player/play", token=token(), corpo=corpo)
+
+
 def tocar(uri: str, dispositivo=None, lista=None):
     aparelho = _escolher_dispositivo(lista if lista is not None else dispositivos(), dispositivo)
-    _pedido("PUT", API + "/me/player/play", token=token(), corpo={
-        "uris": [uri], "device_id": aparelho["id"],
-    })
+    _executar_play({"uris": [uri], "device_id": aparelho["id"]})
 
 
 def tocar_contexto(context_uri: str, dispositivo=None, lista=None, offset=None):
@@ -474,7 +499,7 @@ def tocar_contexto(context_uri: str, dispositivo=None, lista=None, offset=None):
     corpo = {"context_uri": context_uri, "device_id": aparelho["id"]}
     if offset is not None:
         corpo["offset"] = {"position": int(offset)}
-    _pedido("PUT", API + "/me/player/play", token=token(), corpo=corpo)
+    _executar_play(corpo)
 
 
 def comando(acao: str, valor=None):
@@ -490,7 +515,16 @@ def comando(acao: str, valor=None):
         raise ErroSpotify(f"Acao de player desconhecida: {acao}")
 
     metodo = "POST" if acao in {"proxima", "anterior"} else "PUT"
-    return _pedido(metodo, API + "/me/player/" + rotas[acao], token=token())
+    url = API + "/me/player/" + rotas[acao]
+    try:
+        return _pedido(metodo, url, token=token())
+    except ErroSpotify as erro:
+        if erro.codigo != 404:
+            raise
+        # 'retomar' sem aparelho ativo cai no mesmo 404 do play.
+        aparelho = _escolher_dispositivo(dispositivos())
+        _ativar(aparelho["id"])
+        return _pedido(metodo, url, token=token())
 
 
 def tocando():
