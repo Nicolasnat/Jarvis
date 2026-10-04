@@ -1100,89 +1100,180 @@ def _chamar_modelo(conversa, tentativas=3):
     return {"role": "assistant", "content": ""}
 
 
+def _padronizar_resultado(nome: str, resultado_raw: str) -> dict:
+    """Converte resultado bruto da ferramenta em formato padrao {ok, resultado, erro, dica}."""
+    if not isinstance(resultado_raw, str):
+        resultado_raw = str(resultado_raw)
+
+    r = resultado_raw.strip()
+    if not r:
+        return {"ok": False, "resultado": "", "erro": "Resultado vazio", "dica": "Tente novamente ou use outra ferramenta"}
+
+    # Detectar falhas conhecidas
+    r_low = r.lower()
+    if r[:5] in {"FALHA", "Erro ", "BLOQ"} or r_low.startswith("falha:") or r_low.startswith("erro:") or r_low.startswith("bloquead"):
+        return {"ok": False, "resultado": r, "erro": r, "dica": "A ferramenta falhou. Analise o erro e tente corrigir os argumentos ou use outra ferramenta."}
+
+    # Bloqueio de seguranca
+    if "bloqueado por seguran" in r_low or "cancelado pelo usuario" in r_low:
+        return {"ok": False, "resultado": r, "erro": r, "dica": "Operacao bloqueada ou cancelada. Nao tente contornar. Explique a situacao ao usuario."}
+
+    return {"ok": True, "resultado": r, "erro": "", "dica": ""}
+
+
+def _formatar_resultado_para_modelo(nome: str, padrao: dict) -> str:
+    """Formata resultado padronizado para ser devolvido ao modelo como mensagem tool."""
+    if padrao["ok"]:
+        return padrao["resultado"]
+    else:
+        return f"FERRAMENTA {nome} FALHOU: {padrao['erro']}\nDICA: {padrao['dica']}"
+
+
+def _eh_duplicada(chave: str, historico_chamadas: dict) -> bool:
+    """Verifica se a mesma ferramenta com mesmos args ja foi chamada neste turno."""
+    return chave in historico_chamadas
+
+
+def _contar_tentativas_falha(nome: str, args: dict, historico_falhas: dict) -> int:
+    """Conta quantas vezes a mesma ferramenta com mesmos args falhou."""
+    chave = f"{nome}|{json.dumps(args, sort_keys=True, default=str)}"
+    return historico_falhas.get(chave, 0)
+
+
+def _registrar_falha(nome: str, args: dict, historico_falhas: dict):
+    """Registra uma falha para anti-loop."""
+    chave = f"{nome}|{json.dumps(args, sort_keys=True, default=str)}"
+    historico_falhas[chave] = historico_falhas.get(chave, 0) + 1
+
+
 def rodar_turno(conversa, texto: str):
+    """Loop de agente: pensa -> chama ferramentas -> recebe resultados -> decide de novo -> resposta final."""
+    import json
     chamadas = set()
-    # Resultados das ferramentas deste turno (nao do historico inteiro): sem
-    # isso o fallback podia repetir a resposta de um pedido anterior.
     resultados_turno = []
-    # Modelos pequenos repetem a mesma ferramenta no mesmo turno (o Spotify foi
-    # chamado duas vezes seguidas com a mesma musica, so mudando o aparelho).
-    # Cada repeticao custa um ida-e-volta ao Ollama, entao a segunda e as
-    # seguintes reaproveitam o resultado da primeira.
-    feitas = {}
+    feitas = {}  # cache de resultados por (nome, args) para evitar duplicacao exata
+    historico_falhas = {}  # para anti-loop: (nome, args) -> contagem de falhas
+    opencode_usado = False
 
     # Obter max_passos do cerebro ativo
     cfg_ativo = obter_config_ativa()
     max_passos = cfg_ativo.max_passos if cfg_ativo and cfg_ativo.max_passos > 0 else MAX_PASSOS
-    rede_seguranca_local = cfg_ativo.rede_seguranca_palavra_chave if cfg_ativo else False
 
-    for _ in range(max_passos):
-        # A chamada ao cerebro em si nao tem como ser morta no meio, mas da para
-        # parar de pedir mais coisa assim que ela volta: sem isso um 'para' dito
-        # durante o raciocinio do modelo so era notado 30s depois, na fala.
+    for passo in range(max_passos):
         if _interrompido():
             print("[nexus] Interrompido antes do proximo passo.", flush=True)
             break
+
         conversa = podar(conversa)
         _definir_estado("pensando")
         mensagem = _chamar_modelo(conversa)
         conversa.append(mensagem)
 
         if not mensagem.get("tool_calls"):
-            # A resposta final e impressa (e falada) por quem chamou.
+            # Resposta final do modelo (sem ferramentas)
             break
 
+        # Processar TODAS as tool_calls deste passo (multiplas acoes simultaneas)
         nomes_passo, resultados_passo = [], []
+        tool_results_para_modelo = []
+
         for pedido in mensagem.get("tool_calls"):
             nome = pedido["function"]["name"]
             argumentos = pedido["function"].get("arguments") or {}
-            # Alguns modelos (llama3.1) aninham o function call dentro de arguments
-            # {"function": {"name": "x", "arguments": {"function": "...", "parameters": {...}}}}
+
+            # Normalizar aninhamento llama3.1
             if isinstance(argumentos, dict) and "function" in argumentos and "parameters" in argumentos:
                 nome = argumentos["function"]
                 argumentos = argumentos["parameters"]
+
+            # Ajustes especificos (spotify, volume)
             if nome == "spotify":
                 argumentos = _ajustar_spotify(argumentos, texto)
             nome, argumentos = _corrigir_volume(nome, argumentos, texto)
-            print(f"\n[nexus] executando {nome}({argumentos})...", flush=True)
 
+            print(f"\n[nexus] passo {passo+1}/{max_passos} executando {nome}({argumentos})...", flush=True)
+
+            # Anti-duplicacao exata (mesma ferramenta + mesmos args)
             chave = _chave_chamada(nome, argumentos)
-            if chave in feitas:
-                resultado = feitas[chave]
-                print("   (duplicado ignorado)", flush=True)
-            elif nome == "pedir_ao_opencode" and "pedir_ao_opencode" in chamadas:
-                resultado = ("O OpenCode ja foi acionado neste turno. Use o resultado anterior "
-                             "para responder, em vez de chamar a ferramenta de novo.")
-                print("   (duplicado ignorado)", flush=True)
+            if _eh_duplicada(chave, feitas):
+                resultado_padrao = {"ok": False, "resultado": "", "erro": "Duplicada ignorada", "dica": "Ja executada neste turno com mesmos argumentos."}
+                print("   (duplicada ignorada)", flush=True)
+            elif nome == "pedir_ao_opencode" and opencode_usado:
+                resultado_padrao = {"ok": False, "resultado": "", "erro": "OpenCode ja usado neste turno", "dica": "Use o resultado anterior para responder."}
+                print("   (OpenCode duplicado ignorado)", flush=True)
             else:
-                if nome == "pedir_ao_opencode":
-                    argumentos, planejou = enriquecer_com_plano(argumentos, texto, chamadas)
-                    if planejou:
-                        chamadas.add("planejar_com_antigravity")
-                chamadas.add(nome)
-                resultado = executar(nome, argumentos)
-                if nome == "pedir_ao_opencode":
-                    revisao = revisar_plano_pendente()
-                    if revisao:
-                        resultado = f"{resultado}\n\nREVISAO DO ARQUITETO:\n{revisao}"
-                feitas[chave] = resultado
+                # Anti-loop: max 2 tentativas para mesma falha
+                tentativas = _contar_tentativas_falha(nome, argumentos, historico_falhas)
+                if tentativas >= 2:
+                    resultado_padrao = {"ok": False, "resultado": "", "erro": f"Ja falhou {tentativas} vezes com mesmos args", "dica": "Mude os argumentos ou use outra ferramenta."}
+                    print(f"   (anti-loop: {tentativas} falhas anteriores com mesmos args)", flush=True)
+                else:
+                    # Executar ferramenta
+                    if nome == "pedir_ao_opencode":
+                        argumentos, planejou = enriquecer_com_plano(argumentos, texto, chamadas)
+                        if planejou:
+                            chamadas.add("planejar_com_antigravity")
+                        opencode_usado = True
 
-            if resultado[:5] in {"FALHA", "Erro ", "BLOQ"}:
-                print(f"   x {resultado[:300]}", flush=True)
-            conversa.append({"role": "tool", "content": str(resultado)})
-            nomes_passo.append(nome)
-            resultados_passo.append(str(resultado))
-            resultados_turno.append(str(resultado))
+                    chamadas.add(nome)
+                    resultado_raw = executar(nome, argumentos)
+
+                    if nome == "pedir_ao_opencode":
+                        revisao = revisar_plano_pendente()
+                        if revisao:
+                            resultado_raw = f"{resultado_raw}\n\nREVISAO DO ARQUITETO:\n{revisao}"
+
+                    # Padronizar resultado
+                    resultado_padrao = _padronizar_resultado(nome, resultado_raw)
+
+                    # Registrar falha se houver
+                    if not resultado_padrao["ok"]:
+                        _registrar_falha(nome, argumentos, historico_falhas)
+                    else:
+                        # Sucesso: limpar contador de falhas para esta combinacao
+                        chave_falha = f"{nome}|{json.dumps(argumentos, sort_keys=True, default=str)}"
+                        if chave_falha in historico_falhas:
+                            del historico_falhas[chave_falha]
+
+                    feitas[chave] = resultado_padrao
+
+            # Formatar para o modelo (tool message)
+            resultado_para_modelo = _formatar_resultado_para_modelo(nome, resultado_padrao)
+            tool_results_para_modelo.append((pedido.get("id", ""), resultado_para_modelo))
+
+            # Log
+            if not resultado_padrao["ok"]:
+                print(f"   x {resultado_padrao['erro'][:300]}", flush=True)
+            else:
+                print(f"   ok", flush=True)
+
+            resultados_passo.append(resultado_para_modelo)
+            resultados_turno.append(resultado_padrao["resultado"])
 
             if _interrompido():
                 print("[nexus] Interrompido: parando o turno aqui.", flush=True)
                 return conversa, chamadas, resultados_turno
 
+        # Adicionar TODOS os resultados das tools como mensagens tool separadas
+        for tool_call_id, resultado_str in tool_results_para_modelo:
+            conversa.append({"role": "tool", "content": resultado_str, "tool_call_id": tool_call_id})
+
+        # Se todas as ferramentas sao de resposta direta, o modelo nao precisa processar
         if nomes_passo and all(n in RESPOSTA_DIRETA for n in nomes_passo):
-            # O retorno ja e a resposta: fala direto, sem outra ida ao modelo
-            # (que costuma deturpar o que a ferramenta devolveu).
             conversa.append({"role": "assistant", "content": "\n".join(resultados_passo)})
             break
+
+        # Se estouramos max_passos, forcar resposta final
+        if passo == max_passos - 1:
+            _definir_estado("pensando")
+            mensagem_final = _chamar_modelo(conversa + [{
+                "role": "system",
+                "content": f"LIMITE DE {max_passos} PASSOS ATINGIDO. Resuma o que conseguiu, o que faltou e o que o usuario deve fazer. Nao chame mais ferramentas."
+            }])
+            if mensagem_final.get("content"):
+                conversa.append(mensagem_final)
+            break
+
     return conversa, chamadas, resultados_turno
 
 
