@@ -32,6 +32,7 @@ from interface.estilo import (
     FONTE_MONO,
 )
 from interface.orbe import Orbe
+from interface.acoes_rapidas import CapsulaAcoesRapidas
 
 
 class PilulaStatus(QFrame):
@@ -199,6 +200,10 @@ class JanelaPrincipal(QWidget):
         # --- Pilula de Status ---
         self.pilula = PilulaStatus(self.container)
         layout_conteudo.addWidget(self.pilula, 0, Qt.AlignmentFlag.AlignCenter)
+
+        # Capsula de acoes rapidas (acima da barra de comando)
+        self.capsula_acoes = CapsulaAcoesRapidas(self.container)
+        layout_conteudo.addWidget(self.capsula_acoes, 0, Qt.AlignmentFlag.AlignCenter)
 
         layout_conteudo.addSpacing(6)
 

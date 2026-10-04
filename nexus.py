@@ -1675,11 +1675,13 @@ def main():
     if "--help" in sys.argv or "-h" in sys.argv:
         print("Uso: python nexus.py [opcoes]")
         print("Opcoes:")
-        print("  --interface       Inicia com interface grafica de desktop (PySide6)")
-        print("  --voz             Inicia no modo de conversacao por voz")
+        print("  (sem opcoes)      Abre interface grafica por padrao")
+        print("  --interface       Forca modo interface grafica")
+        print("  --voz             Modo conversacao por voz (terminal)")
         print("  --servico         Roda em segundo plano como servico de voz")
         print("  --escrever        Entrada por texto e resposta em voz")
         print("  --texto-voz       Apelido para --escrever")
+        print("  --demo-acoes      Simula sequencia de acoes rapidas na interface")
         print("  --help, -h        Mostra esta ajuda")
         return 0
 
@@ -1698,6 +1700,7 @@ def main():
     modo_voz = "--voz" in sys.argv or modo_servico
     modo_escrita = "--escrever" in sys.argv or "--texto-voz" in sys.argv
     modo_interface = "--interface" in sys.argv
+    demo_acoes_ativado = "--demo-acoes" in sys.argv
 
     ctrl_interface = None
     if modo_interface:
@@ -1770,6 +1773,33 @@ def main():
         else:
             iniciar_agenda()
 
+
+        # Simulacao de acoes rapidas para teste (requer interface)
+        if demo_acoes_ativado:
+            from PySide6.QtCore import QTimer
+
+            ponte_demo = _ponte
+
+            def _emit(nome, args=None, res="OK"):
+                if ponte_demo is not None:
+                    try:
+                        ponte_demo.ferramenta_iniciada.emit(nome, args or {})
+                    except Exception:
+                        pass
+                    try:
+                        ponte_demo.ferramenta_concluida.emit(nome, res)
+                    except Exception:
+                        pass
+
+            seq = []
+            seq.append(lambda: _emit("abrir_programa", {"programa": "spotify"}))
+            seq.append(lambda: _emit("spotify", {"acao": "tocar", "playlist": "Lo-Fi Chill"}, "TOCANDO: LO-FI CHILL"))
+            seq.append(lambda: _emit("definir_volume", {"volume": 40}, "VOLUME: 40%"))
+            seq.append(lambda: _emit("abrir_programa", {"programa": "firefox"}, "FALHA: APP NAO ENCONTRADO"))
+            seq.append(lambda: _emit("pesquisar_na_web", {"busca": "teste"}, "RESULTADO DE PESQUISA SIMULADO"))
+
+            for i, fn in enumerate(seq):
+                QTimer.singleShot(800 + i * 900, fn)
         try:
             codigo = ctrl_interface.executar()
         except KeyboardInterrupt:
