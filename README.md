@@ -263,6 +263,10 @@ As listas `BLOQUEIOS`, `CREDENCIAIS`, `CONFIRMACOES` e `CAMINHOS_PROIBIDOS` defi
 
 A lista de programas que o Nexus pode abrir/fechar fica em [`config/apps.json`](config/apps.json).
 
+A lista de sites fica em [`config/sites.json`](config/sites.json) — voce pode editar para adicionar/remover sites. Formato: `{"nome": "https://url"}`.
+
+Se o site nao estiver no `sites.json`, o Nexus **busca na web (DuckDuckGo)** e abre o primeiro resultado (fallback automatico). Isso evita ter que cadastrar tudo manualmente.
+
 ### 📦 Descobrir aplicativos
 
 O `apps.json` é gerado a partir dos arquivos `.desktop` do sistema. Diga
@@ -331,7 +335,7 @@ Nexus/
 | `agendar_lembrete` / `listar_lembretes` / `cancelar_lembrete` | Lembretes com notificação |
 | `anotar` | Anotações rápidas por dia |
 | `status_sistema` | CPU, RAM, disco, uptime e bateria |
-| `abrir_programa` / `fechar_programa` | Abre/fecha programas e **sites** (ex.: "abre o claude", "abre whatsapp", "abre https://site.com"). Se o navegador estiver fechado, abre automaticamente. |
+| `abrir_programa` / `fechar_programa` | Abre/fecha programas e **sites** (ex.: "abre o claude", "abre whatsapp", "abre https://site.com"). Sites ficam em `config/sites.json` (editavel). Se o site nao estiver la, **busca na web automaticamente** (fallback). Se o navegador estiver fechado, abre automaticamente. |
 | `descobrir_apps` / `listar_apps` | Escaneia os apps instalados e lista os disponíveis |
 | `spotify` | Toca música ou playlist pelo nome (casa a playlist mais parecida), pausar, próxima, volume *(exige Spotify Premium)* |
 | `definir_volume` | Volume do sistema (0–100) |
