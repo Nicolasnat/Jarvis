@@ -229,3 +229,45 @@ ollama pull llama3.1:8b
 ollama pull qwen2.5:7b
 ollama pull nomic-embed-text   # usado na busca em documentos (Etapa 5)
 ```
+
+## Auto-Aprimoramento Supervisionado
+
+O Nexus pode modificar seu proprio codigo de forma segura e supervisionada.
+
+### Como usar
+
+```bash
+# Teste os automatizados (sem Ollama, sem microfone, sem dados/)
+./venv/bin/python nexus.py --autoteste
+```
+
+### Fluxo
+
+1. Voce pede: "corrige esse bug no seu codigo", "adiciona funcao X em voce"
+2. Cria worktree isolada em `~/projetos/.nexus-dev/<id>`
+3. OpenCode trabalha na copia
+4. Roda `python nexus.py --autoteste` na copia
+5. Verifica `config/protegidos.json` (arquivos que nao podem ser tocados)
+6. Apresenta diff e pede sua aprovacao
+6. Merge + `scripts/aplicar_e_vigiar.sh` (reinicia servico, vigia 60s, rollback se falhar)
+
+### Arquivos protegidos
+
+Editados em `config/protegidos.json` - o auto-aprimoramento NAO pode alterar:
+- `seguranca.py`, `config/protegidos.json`, `opencode-permissoes.json`
+- `nexus.service`, `instalar_servico.sh`, `ajustar_microfone.sh`
+- `scripts/aplicar_e_vigiar.sh`, `ferramentas/_spotify.py`, `config/spotify.json`
+- `.git/`, `.gitignore`, `venv/`, `dados/`
+
+### Historico e desfazer
+
+- "o que voce mudou em si mesmo?" -> mostra historico
+- "desfaz a ultima mudança" -> rollback com confirmacao
+
+### Script de vigia
+
+`scripts/aplicar_e_vigiar.sh` - shell independente que:
+1. Reinicia `systemctl --user restart nexus`
+2. Espera 60s (configuravel via `NEXUS_VIGIA_TEMPO`)
+3. Checa `systemctl is-active nexus` + `dados/saude.ok` (timestamp < 2min)
+4. Se falhar: `git reset --hard` para tag `nexus-antes-<id>`, restart, notifica via `notify-send`
