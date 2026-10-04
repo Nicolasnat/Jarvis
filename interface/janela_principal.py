@@ -304,7 +304,7 @@ class JanelaPrincipal(QWidget):
             self.campo_comando.clear()
             self.comando_digitado.emit(texto)
 
-    def definir_estado(self, estado: str) -> None:
+    def definir_estado(self, estado: str, acao: str = "") -> None:
         """Atualiza a pilula e o orbe conforme o estado operacional do assistente."""
         chave = (estado or "").strip().lower()
 
@@ -347,7 +347,10 @@ class JanelaPrincipal(QWidget):
         elif chave in ("executando", "ferramenta", "tarefa"):
             self.pilula.item1.setText("TAREFA ATIVA")
             self.pilula.item1.setStyleSheet(f"color: #ff80ab; font-family: {FONTE_MONO}; font-size: 10px; font-weight: bold;")
-            self.pilula.item2.setText("EXECUTANDO FERRAMENTA")
+            if acao:
+                self.pilula.item2.setText(acao)
+            else:
+                self.pilula.item2.setText("EXECUTANDO FERRAMENTA")
             self.pilula.item2.setStyleSheet(f"color: #ff4081; font-family: {FONTE_MONO}; font-size: 10px; font-weight: bold;")
             self.pilula.item3.setText("KERNEL: ATIVO")
             self.pilula.item3.setStyleSheet(f"color: #ff80ab; font-family: {FONTE_MONO}; font-size: 10px; font-weight: bold;")
