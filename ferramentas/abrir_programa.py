@@ -74,6 +74,22 @@ def _comando_para(app: str):
     if not pedido:
         return None, "Nao entendi qual programa abrir. Diga o nome, ex.: 'abre o vscode'."
 
+    # Se o usuario disse "site do X", "site de X", "pagina do X", "site X"
+    # trata como busca de site, nao app (evita casar com apps como 'code')
+    pedido_lower = app_strip.lower()
+    if any(p in pedido_lower for p in ("site do", "site de", "pagina do", "pagina de", "web do", "web de")):
+        # Remove as palavras-chave e usa o resto como termo de busca
+        for p in ("site do", "site de", "pagina do", "pagina de", "web do", "web de"):
+            if p in pedido_lower:
+                # Pega tudo depois da palavra-chave
+                idx = pedido_lower.index(p) + len(p)
+                termo = app_strip[idx:].strip()
+                if termo:
+                    return _buscar_e_abrir_site(termo), None
+                break
+        # Se nao extraiu termo, tenta com o pedido normalizado
+        return _buscar_e_abrir_site(pedido), None
+
     # Verifica se e um site conhecido (config/sites.json)
     sites = _carregar_sites()
     if pedido in sites:
