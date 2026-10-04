@@ -196,8 +196,20 @@ def conectar():
     return tokens
 
 
+_TOKEN_ACESSO = {"valor": "", "ate": 0.0}
+
+
 def token():
-    """Devolve um access token valido, renovando pelo refresh_token se precisar."""
+    """Devolve um access token valido, renovando pelo refresh_token se precisar.
+
+    O token fica guardado em memoria ate perto de expirar: sem isso cada busca
+    fazia um POST no endpoint de token e o Spotify respondia 429 (rate limit)
+    em rajada, derrubando pedidos legitimos.
+    """
+    agora = time.time()
+    if _TOKEN_ACESSO["valor"] and agora < _TOKEN_ACESSO["ate"]:
+        return _TOKEN_ACESSO["valor"]
+
     salvos = ler_json(ARQUIVO_TOKEN, {})
     if not salvos:
         raise ErroSpotify(
@@ -212,11 +224,14 @@ def token():
             reconectar=True,
         )
 
-    return _token_formulario({
+    dados = _token_formulario({
         "client_id": client_id(),
         "grant_type": "refresh_token",
         "refresh_token": salvos["refresh_token"],
-    })["access_token"]
+    })
+    _TOKEN_ACESSO["valor"] = dados["access_token"]
+    _TOKEN_ACESSO["ate"] = agora + max(30, int(dados.get("expires_in", 3600)) - 60)
+    return _TOKEN_ACESSO["valor"]
 
 
 def buscar(termo: str, limite=5):
@@ -391,7 +406,12 @@ def buscar_playlists(termo: str, limite=10):
         resumo["_preferida"] = prioritise
         encontradas.append(resumo)
 
-    for item in minhas_playlists():
+    try:
+        da_conta = minhas_playlists()
+    except ErroSpotify:
+        # Sem a lista da conta (rede/token) ainda vale tentar a busca publica.
+        da_conta = []
+    for item in da_conta:
         add(item, True)
 
     url = API + "/search?" + urllib.parse.urlencode({
@@ -412,22 +432,6 @@ def buscar_playlists(termo: str, limite=10):
         resumo.pop("_preferida", None)
         resumo.pop("_pontos", None)
     return encontradas
-
-
-def playlists_para_prompt(limite=40) -> str:
-    """Lista as playlists do usuario para o modelo escolher o nome certo."""
-    try:
-        itens = minhas_playlists()
-    except Exception:  # noqa: BLE001 - sem internet/token o prompt segue sem a lista
-        return ""
-    nomes = [(_resumo_playlist(i)["nome"] or "").strip() for i in itens if i]
-    nomes = [nome for nome in nomes if nome]
-    if not nomes:
-        return ""
-    return (
-        "\n\nPlaylists do usuario no Spotify (para 'tocar a playlist', use o nome "
-        "exato como aparece aqui):\n" + ", ".join(nomes[:limite])
-    )
 
 
 def dispositivos():
@@ -558,9 +562,12 @@ def comando(acao: str, valor=None):
     """Acoes do player. 'volume' sem valor consulta; com valor, define."""
     if acao == "volume":
         if valor is None:
-            return _pedido("GET", API + "/me/player/volume", token=token())
-        return _pedido("PUT", API + "/me/player/volume", token=token(),
-                       corpo={"volume_percent": max(0, min(100, int(valor)))})
+            dados = _pedido("GET", API + "/me/player", token=token())
+            return {"volume_percent": (dados.get("device") or {}).get("volume_percent")}
+        # A API espera volume_percent na query, nao no corpo JSON.
+        pct = max(0, min(100, int(valor)))
+        url = API + "/me/player/volume?" + urllib.parse.urlencode({"volume_percent": pct})
+        return _pedido("PUT", url, token=token())
 
     rotas = {"proxima": "next", "anterior": "previous", "pausar": "pause", "retomar": "play"}
     if acao not in rotas:
