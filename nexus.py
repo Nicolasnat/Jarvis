@@ -724,6 +724,7 @@ ALIAS_ARGUMENTOS = {
     "dir": "caminho", "diretorio": "caminho", "path": "caminho", "local": "caminho",
     "instrucao": "tarefa", "prompt": "tarefa", "comando": "tarefa",
     "descricao": "tarefa", "pergunta": "pergunta", "termo": "busca",
+    "programa": "app", "aplicativo": "app", "aplicacao": "app",
 }
 
 
