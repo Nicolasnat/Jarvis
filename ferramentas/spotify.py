@@ -18,10 +18,18 @@ from comum import chave_nome, esquema
 
 NOME = "spotify"
 DESCRICAO = (
-    "Controla o Spotify pelo nome da musica ou playlist. Use para "
-    "'tocar <musica>', 'tocar a playlist <nome>', 'pausar', 'proxima musica', "
-    "'o que esta tocando', 'volume do spotify 40'. Nao informe o aparelho: "
-    "o som sai no computador."
+    "CONTROLA REPRODUCAO do Spotify (ja aberto): "
+    " - 'tocar <musica/playlist>' - toca musica ou playlist pelo nome "
+    " - 'pausar' / 'retomar' / 'proxima' / 'anterior' - controle de playback "
+    " - 'tocando' / 'o que esta tocando' / 'qual musica' - mostra a musica atual "
+    " - 'volume do spotify 50' - ajusta volume (0-100) "
+    " - 'conectar' - PRIMEIRA VEZ so, para autorizar (abre navegador) "
+    "QUANDO USAR: usuario quer OUVIR musica, controlar playback, ajustar volume do Spotify. "
+    "QUANDO NAO USAR: para ABRIR o app Spotify (use 'abrir_programa' app='spotify'), "
+    "para volume do SISTEMA (use 'definir_volume'), "
+    "para buscar info de artista/musica sem tocar (use 'pesquisar_na_web'). "
+    "Exemplos: acao='tocar', musica='Los Hermanos'; acao='volume', valor=30; "
+    "acao='pausar'; acao='tocando'; acao='conectar'."
 )
 PARAMETROS = esquema(
     {

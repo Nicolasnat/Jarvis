@@ -18,10 +18,13 @@ from comum import ARQUIVO_APPS, BASE_PROJETO, chave_nome, ler_json, esquema
 
 NOME = "abrir_programa"
 DESCRICAO = (
-    "Abre um aplicativo instalado ou site no navegador pelo nome. "
-    "Use para 'abrir o X' (apps) ou 'abrir site Y' (sites em config/sites.json). "
-    "Se o site nao estiver cadastrado, tenta buscar na web (fallback). "
-    "Se a lista estiver desatualizada, use antes o descobrir_apps."
+    "ABRE APLICATIVO INSTALADO (spotify, chrome, whatsapp, code, etc) ou SITE no navegador. "
+    "QUANDO USAR: usuario pede 'abrir X', 'abre o Y' - EX: 'abre o whatsapp', 'abrir spotify', 'abre o chrome', 'abre site.com'. "
+    "QUANDO NAO USAR: para COPIAR TEXTO (use 'copiar_clipboard'), "
+    "para abrir pasta/projeto no VS Code (use 'abrir_vscode'), "
+    "para controlar Spotify (use 'spotify'), "
+    "para programas que nao estao na lista (use 'descobrir_apps' antes). "
+    "Exemplos: app='code', app='spotify', app='chrome', app='https://github.com'."
 )
 PARAMETROS = esquema(
     {"app": {"type": "string", "description": "Nome do programa ou site (ex.: vscode, claude, whatsapp, https://site.com)"}},
