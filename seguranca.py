@@ -101,11 +101,12 @@ def detectar_graves(texto: str) -> tuple:
             bloqueados.append(comando)
             continue
 
-        if any(regex.match(comando) for _, regex, _ in BLOQUEIOS_REGEX):
-            bloqueados.append(comando)
+        # Primeiro verifica se e dentro do projeto - se for, nao bloqueia nem pede confirmacao
+        if dentro_do_projeto(comando):
             continue
 
-        if dentro_do_projeto(comando):
+        if any(regex.match(comando) for _, regex, _ in BLOQUEIOS_REGEX):
+            bloqueados.append(comando)
             continue
 
         for _, _, solto in BLOQUEIOS_REGEX:
