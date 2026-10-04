@@ -48,6 +48,8 @@ class ConfigProvedor:
     limite_mensal_tokens: int = 0
     ativo: bool = True
     prioridade: int = 0
+    max_passos: int = 0  # 0 = usa global
+    rede_seguranca_palavra_chave: bool = False  # so para local
 
 
 @dataclass
@@ -334,6 +336,7 @@ class GerenciadorCerebros:
         self._configs: list[ConfigProvedor] = []
         self._estados: dict[str, EstadoProvedorData] = {}
         self._historico_neutro: list[MensagemNeutra] = []
+        self._ultimo_provedor_ativo: str | None = None
         self._carregar_config()
         self._carregar_estados()
         self._carregar_historico()
@@ -342,9 +345,8 @@ class GerenciadorCerebros:
     def _carregar_config(self):
         padrao = {
             "provedores": [
-                {"nome": "gemini-pro-pago", "tipo": "nuvem_pago", "modelo": "", "chave_ref": "GEMINI_API_KEY_PAGO", "limite_mensal_tokens": 1000000, "ativo": True, "prioridade": 1},
-                {"nome": "gemini-flash-gratis", "tipo": "nuvem_gratis", "modelo": "", "chave_ref": "GEMINI_API_KEY_GRATIS", "limite_mensal_tokens": 100000, "ativo": True, "prioridade": 2},
-                {"nome": "ollama-local", "tipo": "local", "modelo": "llama3.1:8b", "chave_ref": "", "limite_mensal_tokens": 0, "ativo": True, "prioridade": 3},
+                {"nome": "gemini-flash-gratis", "tipo": "nuvem_gratis", "modelo": "", "chave_ref": "GEMINI_API_KEY_GRATIS", "limite_mensal_tokens": 100000, "ativo": True, "prioridade": 1, "max_passos": 0, "rede_seguranca_palavra_chave": False},
+                {"nome": "ollama-local", "tipo": "local", "modelo": "llama3.1:8b", "chave_ref": "", "limite_mensal_tokens": 0, "ativo": True, "prioridade": 2, "max_passos": 4, "rede_seguranca_palavra_chave": True},
             ]
         }
         dados = ler_json(self.ARQUIVO_CEREBRO, padrao)
@@ -358,6 +360,8 @@ class GerenciadorCerebros:
                 limite_mensal_tokens=p.get("limite_mensal_tokens", 0),
                 ativo=p.get("ativo", True),
                 prioridade=p.get("prioridade", 0),
+                max_passos=p.get("max_passos", 0),
+                rede_seguranca_palavra_chave=p.get("rede_seguranca_palavra_chave", False),
             ))
         self._configs.sort(key=lambda c: c.prioridade)
         if not self.ARQUIVO_CEREBRO.exists():
@@ -374,6 +378,8 @@ class GerenciadorCerebros:
                 "limite_mensal_tokens": c.limite_mensal_tokens,
                 "ativo": c.ativo,
                 "prioridade": c.prioridade,
+                "max_passos": c.max_passos,
+                "rede_seguranca_palavra_chave": c.rede_seguranca_palavra_chave,
             })
         salvar_json(self.ARQUIVO_CEREBRO, dados)
 
@@ -463,6 +469,12 @@ class GerenciadorCerebros:
         if not provedores_ativos:
             provedores_ativos = list(self._provedores)
 
+        # Notificar mudanca de cerebro ativo
+        provedor_atual = provedores_ativos[0].config.nome if provedores_ativos else None
+        if provedor_atual != self._ultimo_provedor_ativo:
+            self._ultimo_provedor_ativo = provedor_atual
+            self._notificar_mudanca_cerebro(provedor_atual)
+
         ultimo_erro = ""
         for provedor in provedores_ativos:
             if not self.verificar_limites(provedor.config.nome):
@@ -511,6 +523,15 @@ class GerenciadorCerebros:
             return resultado
 
         return ResultadoChat(conteudo="", erro=f"Todos os provedores falharam: {ultimo_erro}", provedor_usado="")
+
+    def _notificar_mudanca_cerebro(self, novo_provedor: str | None):
+        """Chama callback registrado quando o cerebro ativo muda."""
+        global _g_callback_cerebro_mudou
+        if _g_callback_cerebro_mudou and novo_provedor:
+            try:
+                _g_callback_cerebro_mudou(novo_provedor)
+            except Exception:
+                pass
 
     def _extrair_retry_after(self, erro: str) -> int:
         """Extrai segundos de retry-after do erro (se disponivel). Retorna 0 se nao encontrar."""
@@ -620,8 +641,33 @@ class GerenciadorCerebros:
                 ],
             }
 
+    def obter_config_ativa(self) -> ConfigProvedor | None:
+        """Retorna a config do provedor ativo (para max_passos, rede_seguranca, etc)."""
+        prov = self.obter_provedor_ativo()
+        return prov.config if prov else None
+
+    def forcar_local(self, forcar: bool = True):
+        """Modo privado: forca uso do provedor local."""
+        with self._lock:
+            for p in self._provedores:
+                ed = self._estados.get(p.config.nome)
+                if not ed:
+                    ed = EstadoProvedorData()
+                    self._estados[p.config.nome] = ed
+                if p.config.tipo == TipoProvedor.LOCAL:
+                    if forcar:
+                        ed.estado = EstadoProvedor.ATIVO
+                else:
+                    if forcar:
+                        ed.estado = EstadoProvedor.INATIVO
+                    else:
+                        if ed and ed.estado == EstadoProvedor.INATIVO:
+                            ed.estado = EstadoProvedor.ATIVO
+            self._salvar_estados()
+
 
 _g_cerebros: GerenciadorCerebros | None = None
+_g_callback_cerebro_mudou = None
 
 
 def get_gerenciador() -> GerenciadorCerebros:
@@ -629,6 +675,12 @@ def get_gerenciador() -> GerenciadorCerebros:
     if _g_cerebros is None:
         _g_cerebros = GerenciadorCerebros()
     return _g_cerebros
+
+
+def set_callback_cerebro_mudou(callback):
+    """Registra callback chamado quando o cerebro ativo muda."""
+    global _g_callback_cerebro_mudou
+    _g_callback_cerebro_mudou = callback
 
 
 def chat(mensagens: list[MensagemNeutra], ferramentas: list[dict] | None = None) -> ResultadoChat:
@@ -649,3 +701,11 @@ def limpar_historico():
 
 def status_cerebros() -> dict:
     return get_gerenciador().status()
+
+
+def obter_config_ativa() -> ConfigProvedor | None:
+    return get_gerenciador().obter_config_ativa()
+
+
+def forcar_modo_local(forcar: bool = True):
+    get_gerenciador().forcar_local(forcar)

@@ -28,6 +28,11 @@ from cerebro import (
     status_cerebros,
     MensagemNeutra,
     ResultadoChat,
+    obter_config_ativa,
+    forcar_modo_local,
+    set_callback_cerebro_mudou,
+    MAX_PASSOS,
+    MAX_PASSOS_LOCAL,
 )
 
 
@@ -1105,8 +1110,14 @@ def rodar_turno(conversa, texto: str):
     # Cada repeticao custa um ida-e-volta ao Ollama, entao a segunda e as
     # seguintes reaproveitam o resultado da primeira.
     feitas = {}
-    for _ in range(8):
-        # A chamada ao Ollama em si nao tem como ser morta no meio, mas da para
+
+    # Obter max_passos do cerebro ativo
+    cfg_ativo = obter_config_ativa()
+    max_passos = cfg_ativo.max_passos if cfg_ativo and cfg_ativo.max_passos > 0 else MAX_PASSOS
+    rede_seguranca_local = cfg_ativo.rede_seguranca_palavra_chave if cfg_ativo else False
+
+    for _ in range(max_passos):
+        # A chamada ao cerebro em si nao tem como ser morta no meio, mas da para
         # parar de pedir mais coisa assim que ela volta: sem isso um 'para' dito
         # durante o raciocinio do modelo so era notado 30s depois, na fala.
         if _interrompido():
@@ -1912,6 +1923,8 @@ def configurar_cerebro():
             "limite_mensal_tokens": 1000000,
             "ativo": True,
             "prioridade": 1,
+            "max_passos": 0,
+            "rede_seguranca_palavra_chave": False,
         })
         print(f"[OK] nuvem_pago configurado: {modelo_pago}")
     else:
@@ -1926,6 +1939,8 @@ def configurar_cerebro():
             "limite_mensal_tokens": 100000,
             "ativo": True,
             "prioridade": 2,
+            "max_passos": 0,
+            "rede_seguranca_palavra_chave": False,
         })
         print(f"[OK] nuvem_gratis configurado: {modelo_gratis}")
     else:
@@ -1940,6 +1955,8 @@ def configurar_cerebro():
         "limite_mensal_tokens": 0,
         "ativo": True,
         "prioridade": 3,
+        "max_passos": 4,
+        "rede_seguranca_palavra_chave": True,
     })
     print("[OK] local mantido: llama3.1:8b")
 
@@ -2045,6 +2062,8 @@ def main():
         print("  --autoteste       Executa testes automatizados (sem Ollama, sem microfone, sem dados/)")
         print("  --configurar-cerebro  Configura a cadeia de cerebros (chaves Gemini, modelos)")
         print("  --teste-cerebro   Testa a cadeia de cerebros (failover, limites, recuperacao)")
+        print("  --modo-privado    Forca uso do cerebro local (privacidade total)")
+        print("  --modo-nuvem      Volta a usar a cadeia de cerebros (nuvem + local)")
         print("  --help, -h        Mostra esta ajuda")
         return 0
 
@@ -2056,6 +2075,16 @@ def main():
 
     if "--autoteste" in sys.argv:
         return autoteste()
+
+    if "--modo-privado" in sys.argv:
+        forcar_modo_local(True)
+        print("[nexus] Modo privado ativado: usando apenas o cerebro local.")
+        # Nao retorna aqui, continua para rodar normalmente
+
+    if "--modo-nuvem" in sys.argv:
+        forcar_modo_local(False)
+        print("[nexus] Modo nuvem ativado: cadeia de cerebros habilitada.")
+        # Nao retorna aqui, continua para rodar normalmente
 
     aplicar_config_permissoes()
     if AGY:
@@ -2093,6 +2122,16 @@ def main():
                 global _ponte
                 _ponte = Ponte()
                 _set_ponte_seguranca(_ponte)
+                # Registrar callback para mudanca de cerebro ativo
+                def _ao_cerebro_mudar(novo_provedor: str):
+                    _ponte.emitir_cerebro(novo_provedor)
+                    # Aviso por voz curto
+                    if _voz is not None and _voz.disponivel():
+                        if "gemini" in novo_provedor.lower():
+                            _voz.falar("Usando a nuvem", vigiar=False)
+                        elif "ollama" in novo_provedor.lower() or "local" in novo_provedor.lower():
+                            _voz.falar("Modo local", vigiar=False)
+                set_callback_cerebro_mudou(_ao_cerebro_mudar)
                 ctrl_interface = iniciar_interface(ponte=_ponte)
                 # Modo interface habilita voz + texto + janela
                 modo_voz = True
