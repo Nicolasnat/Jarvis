@@ -68,3 +68,7 @@ journalctl --user -u nexus.service -f
 - Não deixe código morto, backups (`.bak`) nem arquivos temporários no repo.
 - Ao terminar, valide com `py_compile` e, se possível, reinicie o serviço e
   confira o `journalctl`.
+
+### Cápsula de ação rápida (interface/acoes_rapidas.py)
+
+- Regra única `deve_usar_capsula(nome)` decide entre cápsula (ações somente-execução) e popup (ações com conteúdo / confirmação). Consultada ANTES de abrir qualquer popup. Veja `interface/acoes_rapidas.py`.
