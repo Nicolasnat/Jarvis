@@ -703,6 +703,11 @@ def status_cerebros() -> dict:
     return get_gerenciador().status()
 
 
+def obter_provedor_ativo():
+    """Retorna o provedor ativo (instancia) ou None."""
+    return get_gerenciador().obter_provedor_ativo()
+
+
 def obter_config_ativa() -> ConfigProvedor | None:
     return get_gerenciador().obter_config_ativa()
 

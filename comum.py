@@ -22,7 +22,12 @@ REDUNDANTES = {"projetos", "projects", "projeto", "project"}
 
 def resolver(caminho) -> Path:
     """Normaliza um caminho para dentro de PASTA_TRABALHO (ou mantem absolutos)."""
-    pasta = Path(str(caminho).strip().strip("\"'")).expanduser()
+    raw = str(caminho).strip().strip("\"'")
+    # Detecta caminho absoluto estilo Windows (C:\...) e pega só o nome final
+    if re.match(r"^[A-Za-z]:[\\/]", raw):
+        # No Linux o Path nao reconhece backslash como separador
+        raw = raw.replace("\\", "/").split("/")[-1]
+    pasta = Path(raw).expanduser()
 
     if not pasta.is_absolute():
         partes = pasta.parts
@@ -119,13 +124,10 @@ ARQUIVO_LEMBRETES = PASTA_DADOS / "lembretes.json"
 ARQUIVO_APPS = PASTA_CONFIG / "apps.json"
 
 
-def memoria_para_prompt(limite=8) -> str:
-    """Devolve um resumo curto da memoria para injetar no prompt do sistema."""
-    fatos = ler_json(ARQUIVO_MEMORIA, [])
-    if not fatos:
-        return ""
-    recentes = fatos[-limite:]
-    linhas = [f"- {item.get('fato', '')}" for item in recentes if item.get("fato")]
-    if not linhas:
-        return ""
-    return "\n\nO que voce ja sabe sobre o usuario (memoria):\n" + "\n".join(linhas)
+def memoria_para_prompt(limite=8, busca: str = "", modo_privado: bool = False, cerebro_nuvem: bool = False) -> str:
+    """Devolve um resumo curto da memoria para injetar no prompt do sistema.
+    Usa memoria ativa (embeddings) se disponivel, fallback para recentes/palavras.
+    """
+    from ferramentas.memoria_ativa import obter_fatos_relevantes, formatar_bloco_memoria
+    fatos = obter_fatos_relevantes(busca, modo_privado=modo_privado, cerebro_nuvem=cerebro_nuvem)
+    return formatar_bloco_memoria(fatos)

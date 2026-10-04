@@ -33,6 +33,7 @@ from cerebro import (
     set_callback_cerebro_mudou,
     MAX_PASSOS,
     MAX_PASSOS_LOCAL,
+    obter_provedor_ativo,
 )
 
 
@@ -1593,7 +1594,12 @@ def rodar_modo_voz(conversa, servico=False):
             _definir_estado("ocioso")
             continue
 
-        conversa[0]["content"] = REGRAS + memoria_para_prompt()
+        # Determina contexto de memoria ativa
+        prov = obter_provedor_ativo()
+        modo_privado = prov is not None and prov.config.tipo.value == "local" and prov.config.rede_seguranca_palavra_chave
+        cerebro_nuvem = prov is not None and prov.config.tipo.value in ("nuvem_gratis", "nuvem_pago")
+
+        conversa[0]["content"] = REGRAS + memoria_para_prompt(busca=texto, modo_privado=modo_privado, cerebro_nuvem=cerebro_nuvem)
         conversa.append({"role": "user", "content": texto})
         global ULTIMO_PEDIDO
         ULTIMO_PEDIDO = texto
@@ -1663,7 +1669,10 @@ def _anunciar_status():
 def conduzir_texto(conversa, texto):
     """Roda um turno escrito e devolve (conversa, resposta)."""
     global ULTIMO_PEDIDO
-    conversa[0]["content"] = REGRAS + memoria_para_prompt()
+    prov = obter_provedor_ativo()
+    modo_privado = prov is not None and prov.config.tipo.value == "local" and prov.config.rede_seguranca_palavra_chave
+    cerebro_nuvem = prov is not None and prov.config.tipo.value in ("nuvem_gratis", "nuvem_pago")
+    conversa[0]["content"] = REGRAS + memoria_para_prompt(busca=texto, modo_privado=modo_privado, cerebro_nuvem=cerebro_nuvem)
     conversa.append({"role": "user", "content": texto})
     ULTIMO_PEDIDO = texto
     _definir_estado("pensando")
