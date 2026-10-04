@@ -96,6 +96,7 @@ def iniciar_interface(ponte=None) -> ControladorInterface:
     from interface.janela_principal import JanelaPrincipal
     from interface.popups.gerenciador import GerenciadorPopups
     from interface.popups.confirmacao import PopupConfirmacao
+    from interface.acoes_rapidas import criar_gerenciador_capsula, deve_usar_capsula
 
     trava = QLockFile(_caminho_trava())
     if not trava.tryLock(100):
@@ -138,6 +139,8 @@ def iniciar_interface(ponte=None) -> ControladorInterface:
             termo = termos_busca.pop(nome, "")
 
             def _abrir() -> None:
+                if deve_usar_capsula(nome):
+                    return
                 gerenciador.abrir_popup(
                     nome=nome,
                     resultado=resultado,
@@ -204,6 +207,13 @@ def iniciar_interface(ponte=None) -> ControladorInterface:
         ponte.pedir_confirmacao.connect(_ao_pedir_confirmacao)
         ponte.confirmacao_respondida.connect(_ao_confirmacao_respondida)
 
-    janela.mostrar_ou_trazer()
+        # Acoes somente-execucao mostram a capsula em vez de popup. O gerenciador
+        # observa os mesmos sinais e cuida dessas; deve_usar_capsula() e a regra
+        # unica que decide o que aparece, checada ANTES de abrir qualquer popup.
+        janela.gerenciador_capsula = criar_gerenciador_capsula(
+            janela=janela, ponte=ponte, parent=janela
+        )
+
+    janela.hide()
 
     return ControladorInterface(app, janela, ponte, gerenciador)

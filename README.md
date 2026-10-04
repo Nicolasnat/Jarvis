@@ -351,3 +351,8 @@ Defina a licença do projeto (ex.: MIT).
 ## 👤 Autor
 
 Feito por [Nicolasnat](https://github.com/Nicolasnat).
+
+
+### Interface desktop (PySide6)
+
+- **Cápsula de ação rápida**: exibe aviso elegante para ações básicas (abrir apps, Spotify, volume etc.), substituindo popups nessas ações. Ações com conteúdo continuam usando popups. Teste com `python nexus.py --interface --demo-acoes`.
