@@ -72,3 +72,12 @@ journalctl --user -u nexus.service -f
 ### Cápsula de ação rápida (interface/acoes_rapidas.py)
 
 - Regra única `deve_usar_capsula(nome)` decide entre cápsula (ações somente-execução) e popup (ações com conteúdo / confirmação). Consultada ANTES de abrir qualquer popup. Veja `interface/acoes_rapidas.py`.
+
+## Auto-Aprimoramento Supervisionado
+
+- **Gatilho**: `pedir_ao_opencode` detecta auto-aprimoramento se `pasta_destino` for a raiz do Nexus (`BASE_PROJETO`) OU o pedido contiver: "seu código", "você mesmo", "no nexus", "nesse bug", "auto-aprimoramento", "melhore o nexus", "corrija você", "em si mesmo".
+- **Fluxo**: worktree isolada em `~/projetos/.nexus-dev/<id>` -> OpenCode -> `python nexus.py --autoteste` -> verifica `config/protegidos.json` -> apresenta diff -> `confirmar_risco` -> merge + `scripts/aplicar_e_vigiar.sh` -> vigia systemd (60s, checa `active` + `dados/saude.ok`) -> rollback automatico se falhar.
+- **Protegidos** (`config/protegidos.json`): `seguranca.py`, `config/protegidos.json`, `opencode-permissoes.json`, `nexus.service`, `instalar_servico.sh`, `ajustar_microfone.sh`, `scripts/aplicar_e_vigiar.sh`, `ferramentas/_spotify.py`, `config/spotify.json`, `.git/`, `.gitignore`, `venv/`, `dados/`.
+- **Historico/Desfazer**: "o que voce mudou em si mesmo?" -> `historico_aprimoramentos()`; "desfaz a ultima mudança" -> `desfazer_ultimo()` (com confirmacao e vigia).
+- **Interface**: popup "AUTO-APRIMORAMENTO // N.E.X.U.S." com diff e botoes Aprovar/Rejeitar/Desfazer (usa `confirmar_risco` bloqueante).
+- **Autoteste** (`--autoteste`): py_compile, imports, schemas, roteamento, politica de seguranca, protegidos. Retorna 0 se tudo passar.
