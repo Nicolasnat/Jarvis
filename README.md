@@ -96,8 +96,8 @@ Ferramentas opcionais só aparecem se o binário estiver instalado.
 
 ```bash
 # 1. Clone o repositório
-git clone https://github.com/Nicolasnat/Jarvis.git
-cd Jarvis
+git clone https://github.com/Nicolasnat/Nexus.git
+cd Nexus
 
 # 2. Crie e ative um ambiente virtual
 python3 -m venv venv

@@ -96,7 +96,7 @@ def iniciar_interface(ponte=None) -> ControladorInterface:
     from interface.janela_principal import JanelaPrincipal
     from interface.popups.gerenciador import GerenciadorPopups
     from interface.popups.confirmacao import PopupConfirmacao
-    from interface.acoes_rapidas import criar_gerenciador_capsula, deve_usar_capsula
+    from interface.acoes_rapidas import criar_gerenciador_capsula, deve_usar_capsula, _texto_executando
 
     trava = QLockFile(_caminho_trava())
     if not trava.tryLock(100):
@@ -126,7 +126,8 @@ def iniciar_interface(ponte=None) -> ControladorInterface:
         ponte.wakeword.connect(janela.mostrar_ou_trazer)
 
         def _ao_iniciar_ferramenta(nome: str, argumentos: dict) -> None:
-            janela.definir_estado("executando")
+            acao_texto = _texto_executando(nome, argumentos or {})
+            janela.definir_estado("executando", acao_texto)
             import time
             tempos_inicio[nome] = time.time()
             if isinstance(argumentos, dict) and "busca" in argumentos:
