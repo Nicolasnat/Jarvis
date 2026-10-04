@@ -1,7 +1,7 @@
-"""Funcoes e constantes compartilhadas entre o Jarvis e os plugins.
+"""Funcoes e constantes compartilhadas entre o Nexus e os plugins.
 
 Fica num modulo separado para que os plugins possam importar helpers sem
-criar import circular com o jarvis.py (que roda como __main__).
+criar import circular com o nexus.py (que roda como __main__).
 """
 import json
 import re
@@ -42,7 +42,7 @@ def resolver(caminho) -> Path:
 
 
 def permitido_para_escrita(pasta) -> bool:
-    """So permite criar/escrever dentro da pasta de projetos ou do proprio Jarvis."""
+    """So permite criar/escrever dentro da pasta de projetos ou do proprio Nexus."""
     alvo = Path(pasta).resolve()
     for base in (PASTA_TRABALHO.resolve(), BASE_PROJETO.resolve()):
         try:
@@ -132,7 +132,7 @@ def memoria_para_prompt(limite=8) -> str:
 
 
 def apps_para_prompt(limite=120) -> str:
-    """Lista os aplicativos que o Jarvis pode abrir, para o modelo escolher o nome certo."""
+    """Lista os aplicativos que o Nexus pode abrir, para o modelo escolher o nome certo."""
     apps = ler_json(ARQUIVO_APPS, {})
     if not apps:
         return ""

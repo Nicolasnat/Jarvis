@@ -1,5 +1,6 @@
 import json
 import os
+import random
 import re
 import sys
 import inspect
@@ -30,14 +31,33 @@ PERMISSOES_AUTOMATICAS = True
 LIMITE_HISTORICO = 14
 
 AGY = shutil.which("agy")
-MODELO_ANTIGRAVITY = "gemini-3.1-pro-high"
+
+# O Antigravity embute o esforco no NOME do modelo (sufixos -low/-medium/-high).
+# Passar --effort com um valor diferente do sufixo e recusado pelo CLI, entao
+# 'esforco_do_modelo' deriva o esforco do proprio nome. Os modelos -high sao o
+# teto pratico hoje ('gemini-3.8-flash' so aceita low/medium/high; nao ha -max
+# exposto no 'agy models').
+MODELO_ARQUITETO = "gemini-3.1-pro-high"
+MODELO_EXECUTOR = "gemini-3.8-flash-high"
+ESFORCO_ARQUITETO = "high"
+ESFORCO_EXECUTOR = "high"
+ESFORCOS_VALIDOS = ("low", "medium", "high", "xhigh", "max")
+# O sandbox do agy auto-recusa ferramentas em modo headless (-p) sem allow-rules
+# no settings.json, o que quebra o trabalho real. Fica False por padrao; ligue
+# so se preencher permissions.allow.
+ANTIGRAVITY_SANDBOX = False
 ANTIGRAVITY_PLANEJA = True
-ANTIGRAVITY_TOKEN = "<!-- jarvis:regras -->"
+ANTIGRAVITY_TOKEN = "<!-- nexus:regras -->"
 REGRAS_ANTIGRAVITY = Path.home() / ".gemini" / "GEMINI.md"
 SETTINGS_ANTIGRAVITY = Path.home() / ".gemini" / "antigravity-cli" / "settings.json"
 
 CONFIG_PERMISSOES = Path(__file__).resolve().parent / "opencode-permissoes.json"
 ULTIMO_PEDIDO = ""
+
+# O modulo voz so e carregado no modo voz. Fora dele '_interrompido()' e sempre
+# False e o Nexus continua se comportando como antes (Ctrl+C no terminal).
+_voz = None
+
 CHROME_OPENCODE = re.compile(r"^>\s*(build|plan|general)\s*[·|]")
 
 CAMINHOS_PROIBIDOS = [
@@ -48,7 +68,7 @@ CAMINHOS_PROIBIDOS = [
 ]
 
 # Destruicao do sistema, do disco ou vazamento de credenciais. O OpenCode bloqueia
-# sozinho e o --auto nao burla isso. Nao ha como o Jarvis liberar.
+# sozinho e o --auto nao burla isso. Nao ha como o Nexus liberar.
 BLOQUEIOS = [
     "rm -rf /", "rm -rf /*", "rm -rf ~", "rm -rf ~/*", "rm -rf $HOME", "rm -rf $HOME/*",
     "rm -fr /", "rm -fr /*", "rm -fr ~", "rm -fr ~/*",
@@ -71,7 +91,7 @@ CREDENCIAIS = [
     "*.docker/config.json*", "*.config/opencode/*",
 ]
 
-# Coisas destrutivas ou irreversiveis, mas legitimas em contexto. O Jarvis pergunta
+# Coisas destrutivas ou irreversiveis, mas legitimas em contexto. O Nexus pergunta
 # uma vez e, se voce confirmar, executa normalmente.
 CONFIRMACOES = [
     "sudo *", "sudo", "su *", "su", "doas *",
@@ -91,7 +111,7 @@ CONFIRMACOES = [
 # ---------- AJUDANTES E FERRAMENTAS ----------
 
 def gerar_config_permissoes() -> dict:
-    """Politica aplicada so ao OpenCode chamado pelo Jarvis (via OPENCODE_CONFIG)."""
+    """Politica aplicada so ao OpenCode chamado pelo Nexus (via OPENCODE_CONFIG)."""
     bash = {"*": "allow"}
     for padrao in BLOQUEIOS:
         bash[padrao] = "deny"
@@ -139,9 +159,9 @@ def bloco_regras_antigravity() -> str:
     credenciais = ", ".join(f"`{p}`" for p in CREDENCIAIS)
     sensiveis = ", ".join(f"`{p}`" for p in CONFIRMACOES)
     return f"""{ANTIGRAVITY_TOKEN}
-# Regras do Jarvis
+# Regras do Nexus
 
-Voce opera dentro do Jarvis e deve seguir estas regras sempre.
+Voce opera dentro do Nexus e deve seguir estas regras sempre.
 
 NUNCA execute, mesmo que pecam, comandos que destruam o sistema ou vazem credenciais:
 {proibidos}
@@ -251,19 +271,19 @@ def detectar_graves(texto: str) -> tuple:
 
 
 def confirmar_risco(comandos) -> bool:
-    print("\n[jarvis] ATENCAO: a tarefa envolve operacoes sensiveis:")
+    print("\n[nexus] ATENCAO: a tarefa envolve operacoes sensiveis:")
     for comando in comandos:
         print(f"    ! {comando[:160]}")
     while True:
         try:
-            resposta = input("[jarvis] Confirma a execucao? (digite 'sim'): ").strip().lower()
+            resposta = input("[nexus] Confirma a execucao? (digite 'sim'): ").strip().lower()
         except (KeyboardInterrupt, EOFError):
             return False
         if resposta in {"sim", "s", "yes", "y"}:
             return True
         if resposta in {"nao", "não", "n", "no"}:
             return False
-        print("[jarvis] Responda 'sim' ou 'nao'.")
+        print("[nexus] Responda 'sim' ou 'nao'.")
 
 
 def batimento(parado: threading.Event, rotulo: str):
@@ -271,6 +291,49 @@ def batimento(parado: threading.Event, rotulo: str):
     while not parado.wait(15):
         minutos, segundos = divmod(int(time.time() - inicio), 60)
         print(f"\r   ... {rotulo} ha {minutos}m{segundos:02d}s", end="", flush=True)
+
+
+def _interrompido() -> bool:
+    """True se o usuario mandou parar. Fora do modo voz nunca acontece."""
+    return _voz is not None and _voz.interrompido()
+
+
+def _abrir_vigia(limiar=None):
+    """Abre o microfone para o usuario poder interromper o que estiver rodando."""
+    if _voz is not None:
+        _voz.vigiar_interrupcao(limiar)
+
+
+def _fechar_vigia():
+    if _voz is not None:
+        _voz.parar_vigia()
+
+
+def _matar_processo(processo):
+    try:
+        processo.kill()
+    except OSError:
+        pass
+
+
+def _vigia_parada(processo, parado: threading.Event, inicio: float, tempo, rotulo: str, motivo: dict):
+    """Mata o processo quando o usuario pede para parar, ou quando da tempo demais.
+
+    Vigiar por fora do laco de stdout e obrigatorio: um agente de codigo pode
+    ficar minutos sem imprimir uma linha nenhuma, e nesse tempo o laco esta
+    bloqueado lendo o pipe e nao ve nem o pedido de parada nem o relogio. Era
+    por isso que o primeiro 'para' nao tinha efeito nos comandos mais lentos, e
+    tambem por isso que um comando travado segurava os TEMPO_CODIGO inteiros.
+    """
+    while not parado.wait(0.2):
+        if _interrompido():
+            motivo["texto"] = f"INTERROMPIDO: '{rotulo}' foi encerrado porque voce pediu para parar."
+            _matar_processo(processo)
+            return
+        if tempo and time.time() - inicio > tempo:
+            motivo["texto"] = f"Interrompido: '{rotulo}' passou de {tempo}s."
+            _matar_processo(processo)
+            return
 
 
 def rodar(comando, tempo=TEMPO_PADRAO, pasta=None, mostrar=True, stdin_nulo=True, env_extra=None):
@@ -298,12 +361,19 @@ def rodar(comando, tempo=TEMPO_PADRAO, pasta=None, mostrar=True, stdin_nulo=True
 
     linhas = []
     parado = threading.Event()
+    motivo = {"texto": ""}
     batendo = None
     if mostrar:
         batendo = threading.Thread(target=batimento, args=(parado, comando[0]), daemon=True)
         batendo.start()
 
     inicio = time.time()
+    threading.Thread(
+        target=_vigia_parada,
+        args=(processo, parado, inicio, tempo, comando[0], motivo),
+        daemon=True,
+    ).start()
+
     try:
         for linha in processo.stdout:
             limpa = limpar_ansi(linha).rstrip()
@@ -311,14 +381,19 @@ def rodar(comando, tempo=TEMPO_PADRAO, pasta=None, mostrar=True, stdin_nulo=True
                 linhas.append(limpa)
                 if mostrar:
                     print(f"   | {limpa}", flush=True)
-            if time.time() - inicio > tempo:
-                processo.kill()
-                return f"Interrompido: '{comando[0]}' passou de {tempo}s."
     finally:
         parado.set()
-        processo.wait()
+        try:
+            processo.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            _matar_processo(processo)
         if mostrar:
             print("\r" + " " * 60 + "\r", end="", flush=True)
+
+    if motivo["texto"]:
+        return motivo["texto"]
+    if _interrompido():
+        return f"INTERROMPIDO: '{comando[0]}' foi encerrado porque voce pediu para parar."
 
     saida = "\n".join(linhas).strip()
     if processo.returncode != 0 and not saida:
@@ -360,9 +435,9 @@ def pedir_ao_opencode(tarefa: str, pasta_destino: str = ".") -> str:
 
     bloqueados, a_confirmar = detectar_graves(tarefa)
     if bloqueados:
-        return ("BLOQUEADO pelo Jarvis, nem chegou a ser enviado ao OpenCode:\n"
+        return ("BLOQUEADO pelo Nexus, nem chegou a ser enviado ao OpenCode:\n"
                 + "\n".join(f"- {c}" for c in bloqueados)
-                + "\nEssas operacoes destroem o sistema ou vazam credenciais. O Jarvis nunca as executa.")
+                + "\nEssas operacoes destroem o sistema ou vazam credenciais. O Nexus nunca as executa.")
 
     if a_confirmar and not confirmar_risco(a_confirmar):
         return "CANCELADO pelo usuario. Nada foi executado."
@@ -374,7 +449,7 @@ def pedir_ao_opencode(tarefa: str, pasta_destino: str = ".") -> str:
     config = aplicar_config_permissoes()
     ambiente = {"OPENCODE_CONFIG": str(config)}
     if a_confirmar:
-        ambiente["JARVIS_PERMISSOES"] = "confirmadas"
+        ambiente["NEXUS_PERMISSOES"] = "confirmadas"
 
     print(f"   >>> OpenCode trabalhando em {pasta}", flush=True)
     resultado = rodar(comando + [tarefa], tempo=TEMPO_CODIGO, pasta=pasta, env_extra=ambiente)
@@ -389,6 +464,41 @@ def pedir_ao_claude(tarefa: str):
     return rodar(["claude", "-p", tarefa], tempo=TEMPO_CODIGO)
 
 
+_ULTIMA_CONVERSA_AGY = {"id": "", "pasta": ""}
+
+# Guarda o plano pendente para o passo de revisao, depois do OpenCode construir.
+_PLANO_ATUAL = {"texto": "", "pasta": ""}
+ANTIGRAVITY_REVISAO = True
+
+
+def esforco_do_modelo(modelo: str, desejado: str = "high") -> str:
+    """Deriva o --effort do sufixo do modelo; o agy recusa se nao casar."""
+    nome = (modelo or "").lower()
+    for esforco in ESFORCOS_VALIDOS:
+        if nome.endswith("-" + esforco):
+            return esforco
+    desejado = (desejado or "high").lower()
+    return desejado if desejado in ESFORCOS_VALIDOS else "high"
+
+
+def _agy_flags(modelo: str, esforco: str) -> list:
+    """Flags comuns do agy: permissao, modelo e esforco coerente."""
+    permissao = "--sandbox" if ANTIGRAVITY_SANDBOX else "--dangerously-skip-permissions"
+    return [AGY, permissao, "--model", modelo, "--effort", esforco_do_modelo(modelo, esforco)]
+
+
+def _agy_json(resultado: str):
+    """Extrai o objeto JSON que o agy imprime no fim do -p --output-format json."""
+    for linha in reversed(resultado.splitlines()):
+        linha = linha.strip()
+        if linha.startswith("{") and linha.endswith("}"):
+            try:
+                return json.loads(linha)
+            except ValueError:
+                continue
+    return None
+
+
 def pedir_ao_antigravity(tarefa: str, pasta_destino: str = ".") -> str:
     """Usa o Antigravity como executor/consultor, com o mesmo gate de risco do OpenCode."""
     if not AGY:
@@ -396,7 +506,7 @@ def pedir_ao_antigravity(tarefa: str, pasta_destino: str = ".") -> str:
 
     bloqueados, a_confirmar = detectar_graves(tarefa)
     if bloqueados:
-        return ("BLOQUEADO pelo Jarvis, nem chegou ao Antigravity:\n"
+        return ("BLOQUEADO pelo Nexus, nem chegou ao Antigravity:\n"
                 + "\n".join(f"- {c}" for c in bloqueados)
                 + "\nEssas operacoes destroem o sistema ou vazam credenciais.")
     if a_confirmar and not confirmar_risco(a_confirmar):
@@ -407,15 +517,16 @@ def pedir_ao_antigravity(tarefa: str, pasta_destino: str = ".") -> str:
     confiar_no_workspace(pasta)
     aplicar_regras_antigravity()
 
-    comando = [AGY, "--dangerously-skip-permissions", "--model", MODELO_ANTIGRAVITY, "-p", tarefa]
-    print(f"   >>> Antigravity executando ({MODELO_ANTIGRAVITY}) em {pasta}", flush=True)
+    esforco = esforco_do_modelo(MODELO_EXECUTOR, ESFORCO_EXECUTOR)
+    comando = _agy_flags(MODELO_EXECUTOR, ESFORCO_EXECUTOR) + ["-p", tarefa]
+    print(f"   >>> Antigravity executando ({MODELO_EXECUTOR}, esforco {esforco}) em {pasta}", flush=True)
     resultado = rodar(comando, tempo=TEMPO_CODIGO, pasta=pasta)
     print(f"   {inspecionar_projeto(str(pasta))}", flush=True)
     return resumir_busca(resultado, 3000)
 
 
 def planejar_com_antigravity(pedido: str, pasta_destino: str = ".") -> str:
-    """Pede so o plano. Roda sem --dangerously-skip-permissions, entao nao cria nada."""
+    """Pede so o plano. Roda em --mode plan, entao nao cria nada."""
     if not AGY:
         return "O Antigravity (agy) nao esta instalado nesta maquina."
 
@@ -430,14 +541,67 @@ def planejar_com_antigravity(pedido: str, pasta_destino: str = ".") -> str:
         "nada: apenas descreva o plano. Inclua: stack, estrutura de arquivos, passos em ordem, comandos "
         f"exatos e como validar. Maximo 25 linhas, sem codigo completo.\n\nPEDIDO DO USUARIO: {pedido}"
     )
-    comando = [AGY, "--mode", "plan", "--model", MODELO_ANTIGRAVITY, "-p", instrucao]
-    print(f"   >>> Antigravity planejando ({MODELO_ANTIGRAVITY}) em {pasta}", flush=True)
-    plano = rodar(comando, tempo=TEMPO_PLANO, pasta=pasta)
+
+    esforco = esforco_do_modelo(MODELO_ARQUITETO, ESFORCO_ARQUITETO)
+    comando = _agy_flags(MODELO_ARQUITETO, ESFORCO_ARQUITETO)
+    # Continuidade: se o ultimo plano foi nesta mesma pasta, retoma a conversa
+    # do arquiteto em vez de recomecar do zero a cada pedido.
+    if _ULTIMA_CONVERSA_AGY["id"] and _ULTIMA_CONVERSA_AGY["pasta"] == str(pasta):
+        comando += ["--conversation", _ULTIMA_CONVERSA_AGY["id"]]
+    comando += ["--mode", "plan", "--output-format", "json", "-p", instrucao]
+    print(f"   >>> Antigravity planejando ({MODELO_ARQUITETO}, esforco {esforco}) em {pasta}", flush=True)
+    bruto = rodar(comando, tempo=TEMPO_PLANO, pasta=pasta)
+
+    dados = _agy_json(bruto)
+    if dados and (dados.get("response") or "").strip():
+        plano = dados["response"].strip()
+        conversa = dados.get("conversation_id") or ""
+        if conversa:
+            _ULTIMA_CONVERSA_AGY.update(id=conversa, pasta=str(pasta))
+    else:
+        # Sem JSON valido (versao antiga do agy, modo texto): usa a saida crua.
+        plano = bruto
 
     linhas = [l for l in plano.splitlines() if l.strip()]
     if len(linhas) < 2 or "nao esta instalado" in plano:
         return ""
     return plano
+
+
+def revisar_com_antigravity(plano: str, pasta_destino: str = ".") -> str:
+    """Passo de revisao: confere o que foi construido contra o plano. Nao altera nada."""
+    if not AGY or not ANTIGRAVITY_REVISAO or not plano:
+        return ""
+
+    pasta = resolver(pasta_destino)
+    confiar_no_workspace(pasta)
+    aplicar_regras_antigravity()
+
+    instrucao = (
+        "Voce e o REVISOR. Um agente implementou a tarefa nesta pasta. Leia os arquivos "
+        "reais do disco e compare com o PLANO abaixo. Responda em no maximo 10 linhas, "
+        "concreto: (1) o que ja esta pronto, (2) o que falta, (3) o que esta errado ou "
+        "quebrado. Nao crie nem altere arquivos, apenas relate.\n\n"
+        f"PLANO:\n{plano}"
+    )
+    comando = _agy_flags(MODELO_ARQUITETO, ESFORCO_ARQUITETO) + ["--mode", "plan", "-p", instrucao]
+    print("   >>> Antigravity revisando o resultado...", flush=True)
+    resultado = rodar(comando, tempo=TEMPO_PLANO, pasta=pasta)
+    if _interrompido():
+        return ""
+    return resumir_busca(resultado, 1500)
+
+
+def revisar_plano_pendente() -> str:
+    """Consome o plano pendente (se houver) e devolve a revisao do arquiteto."""
+    if not AGY or not ANTIGRAVITY_REVISAO:
+        return ""
+    plano = _PLANO_ATUAL.get("texto") or ""
+    if not plano:
+        return ""
+    pasta = _PLANO_ATUAL.get("pasta") or "."
+    _PLANO_ATUAL.update(texto="", pasta="")
+    return revisar_com_antigravity(plano, pasta)
 
 
 # ---------- CATALOGO UNICO DE FERRAMENTAS ----------
@@ -560,7 +724,7 @@ def enriquecer_com_plano(argumentos: dict, texto: str, chamadas: set):
         return argumentos, False
 
     pasta = argumentos.get("pasta_destino") or detecta_pasta(texto) or "."
-    print("\n[jarvis] Antigravity planeja, OpenCode implementa...", flush=True)
+    print("\n[nexus] Antigravity planeja, OpenCode implementa...", flush=True)
     plano = planejar_com_antigravity(texto, pasta)
     if not plano:
         print("   (sem plano do Antigravity; seguindo direto para o OpenCode)", flush=True)
@@ -569,6 +733,8 @@ def enriquecer_com_plano(argumentos: dict, texto: str, chamadas: set):
     novo = dict(argumentos)
     novo["tarefa"] = (f"PLANO DE ARQUITETURA (siga este plano):\n{plano}\n\n"
                       f"PEDIDO ORIGINAL: {tarefa}")
+    # Guarda o plano para a revisao que roda depois do OpenCode construir.
+    _PLANO_ATUAL.update(texto=plano, pasta=str(resolver(pasta)))
     print("   (plano anexado a tarefa do OpenCode)", flush=True)
     return novo, True
 
@@ -642,7 +808,7 @@ def podar(conversa):
     return cabeca + corpo[-(LIMITE_HISTORICO - 1):]
 
 
-REGRAS = f"""Voce e o JARVIS, assistente local em portugues do Brasil. Curto e direto.
+REGRAS = f"""Voce e o NEXUS, assistente local em portugues do Brasil. Curto e direto.
 
 SUA DIVISAO DE TRABALHO (obrigatoria):
 1. CODIGO E PROJETOS sao SEMPRE delegate ao OpenCode. Se o pedido envolver criar, gerar, montar, alterar ou rodar projeto, app, site, script, componente, API, instalar dependencia ou build, voce OBRIGATORIAMENTE chama 'pedir_ao_opencode' com a pasta_destino correta. Voce nunca escreve, cria ou modifica arquivo de codigo.
@@ -702,7 +868,7 @@ def _gate_seguranca(meta: dict, argumentos: dict):
     alvo = " ".join(str(valor) for valor in (argumentos or {}).values())
     bloqueados, a_confirmar = detectar_graves(alvo)
     if bloqueados:
-        return "BLOQUEADO pelo Jarvis:\n" + "\n".join(f"- {c}" for c in bloqueados)
+        return "BLOQUEADO pelo Nexus:\n" + "\n".join(f"- {c}" for c in bloqueados)
     if a_confirmar and not confirmar_risco(a_confirmar):
         return "CANCELADO pelo usuario. Nada foi executado."
     if nivel == "sempre" and not confirmar_risco([f"{meta['nome']}: {alvo[:120]}"]):
@@ -768,10 +934,10 @@ PALAVRAS_ENCERRAR = {
 }
 
 # Palavras que podem aparecer ao redor do verbo de encerramento sem transformar
-# a frase em outro pedido. 'desligar o spotlight do jarvis' NAO pode encerrar:
+# a frase em outro pedido. 'desligar o spotlight do nexus' NAO pode encerrar:
 # 'spotlight' nao esta aqui, e e por isso que ele nao entra.
 CORTESIA_ENCERRAR = {
-    "pode", "poderia", "podes", "quero", "queria", "jarvis", "me", "a", "o",
+    "pode", "poderia", "podes", "quero", "queria", "nexus", "me", "a", "o",
     "as", "os", "um", "uma", "de", "do", "da", "dos", "das", "por", "favor",
     "vc", "voce", "e", "va", "bora", "ja", "agradece", "obrigado", "obrigada",
     "entao", "ai", "aqui", "com", "no", "na", "ser", "ficar", "final",
@@ -793,6 +959,21 @@ def _quer_encerrar(texto: str) -> bool:
     return all(p in PALAVRAS_ENCERRAR or p in CORTESIA_ENCERRAR for p in partes)
 
 
+# 'para' dito como comando, e nao como wakeword. O mesmo cuidado do encerramento:
+# precisa ser uma frase curta so de verbo de parada. 'para de tocar musica' tem
+# 'musica' e portanto NAO e um cancelamento (e um pedido legitimo).
+PALAVRAS_PARAR = {
+    "para", "parar", "pare", "parou", "parando", "cancela", "cancele",
+    "cancelar", "cancelou", "interrompe", "interromper", "interrompido",
+    "interrompa", "chega", "basta", "cala", "silencio", "socia",
+}
+
+CORTESIA_PARAR = {
+    "pode", "poderia", "podes", "por", "favor", "vc", "voce", "ai", "entao",
+    "aqui", "ja", "agora", "tudo", "esse", "essa", "isso", "obrigado", "obrigada",
+}
+
+
 def rodar_turno(conversa, texto: str):
     chamadas = set()
     # Modelos pequenos repetem a mesma ferramenta no mesmo turno (o Spotify foi
@@ -801,6 +982,12 @@ def rodar_turno(conversa, texto: str):
     # seguintes reaproveitam o resultado da primeira.
     feitas = {}
     for _ in range(8):
+        # A chamada ao Ollama em si nao tem como ser morta no meio, mas da para
+        # parar de pedir mais coisa assim que ela volta: sem isso um 'para' dito
+        # durante o raciocinio do modelo so era notado 30s depois, na fala.
+        if _interrompido():
+            print("[nexus] Interrompido antes do proximo passo.", flush=True)
+            break
         conversa = podar(conversa)
         r = ollama.chat(model=MODELO, messages=conversa, tools=MANUAL)
         mensagem = r["message"]
@@ -808,13 +995,13 @@ def rodar_turno(conversa, texto: str):
 
         if not mensagem.get("tool_calls"):
             if mensagem.get("content"):
-                print(f"\nJarvis: {mensagem['content']}")
+                print(f"\nNexus: {mensagem['content']}")
             break
 
         for pedido in mensagem.get("tool_calls"):
             nome = pedido["function"]["name"]
             argumentos = pedido["function"].get("arguments") or {}
-            print(f"\n[jarvis] executando {nome}({argumentos})...", flush=True)
+            print(f"\n[nexus] executando {nome}({argumentos})...", flush=True)
 
             chave = _chave_chamada(nome, argumentos)
             if chave in feitas:
@@ -831,11 +1018,19 @@ def rodar_turno(conversa, texto: str):
                         chamadas.add("planejar_com_antigravity")
                 chamadas.add(nome)
                 resultado = executar(nome, argumentos)
+                if nome == "pedir_ao_opencode":
+                    revisao = revisar_plano_pendente()
+                    if revisao:
+                        resultado = f"{resultado}\n\nREVISAO DO ARQUITETO:\n{revisao}"
                 feitas[chave] = resultado
 
             if resultado[:5] in {"FALHA", "Erro ", "BLOQ"}:
                 print(f"   x {resultado[:300]}", flush=True)
             conversa.append({"role": "tool", "content": str(resultado)})
+
+            if _interrompido():
+                print("[nexus] Interrompido: parando o turno aqui.", flush=True)
+                return conversa, chamadas
     return conversa, chamadas
 
 
@@ -844,12 +1039,15 @@ def garantir_opencode(conversa, texto: str, chamadas: set) -> set:
         return chamadas
 
     pasta = detecta_pasta(texto) or "."
-    print("\n[jarvis] o pedido e de codigo e o OpenCode nao foi acionado. Forcando delegacao...", flush=True)
+    print("\n[nexus] o pedido e de codigo e o OpenCode nao foi acionado. Forcando delegacao...", flush=True)
     argumentos = {"tarefa": montar_tarefa_opencode(texto, resolver(pasta)), "pasta_destino": pasta}
     argumentos, planejou = enriquecer_com_plano(argumentos, texto, chamadas)
     if planejou:
         chamadas.add("planejar_com_antigravity")
     resultado = executar("pedir_ao_opencode", argumentos)
+    revisao = revisar_plano_pendente()
+    if revisao:
+        resultado = f"{resultado}\n\nREVISAO DO ARQUITETO:\n{revisao}"
     conversa.append({"role": "tool", "content": str(resultado)})
 
     if re.search(r"\b(vscode|vs code|visual studio code|editor)\b", texto, re.I) and "abrir_vscode" not in chamadas:
@@ -858,7 +1056,7 @@ def garantir_opencode(conversa, texto: str, chamadas: set) -> set:
 
     r = ollama.chat(model=MODELO, messages=podar(conversa))
     if r["message"].get("content"):
-        print(f"\nJarvis: {r['message']['content']}")
+        print(f"\nNexus: {r['message']['content']}")
     return chamadas | {"pedir_ao_opencode"}
 
 
@@ -869,37 +1067,135 @@ def extrair_resposta(conversa) -> str:
     return ""
 
 
+def _quer_parar(texto: str) -> bool:
+    """True se o pedido foi so 'para alguma coisa'.
+
+    Cobre o caso em que o 'para' chega como comando: o microfone estava
+    gravando (por isso nao existe vigia de interrupcao nessa hora), a palavra
+    entra como transcricao e precisa ser reconhecida antes de gastar um turno
+    do modelo inteiro com ela.
+    """
+    partes = chave_nome(texto or "").split()
+    if not partes or len(partes) > 4:
+        return False
+    if not any(p in PALAVRAS_PARAR for p in partes):
+        return False
+    return all(p in PALAVRAS_PARAR or p in CORTESIA_PARAR for p in partes)
+
+
+# Saudacoes curtas faladas assim que a wakeword dispara. Antes era um unico
+# 'Pois nao?' fixo; agora variam e sao geradas pela Ollama. Para o aviso nao
+# atrasar (o microfone ja esta gravando nessa hora), a Ollama gera um lote em
+# segundo plano e a lista padrao cobre os primeiros toques, sem latencia.
+AVISOS_PADRAO = [
+    "Ouvindo.",
+    "Pode falar.",
+    "Estou aqui.",
+    "Sim?",
+    "Certo.",
+    "Diga o comando.",
+    "O que deseja?",
+]
+
+_avisos = []
+_avisos_lock = threading.Lock()
+_gerando_avisos = threading.Event()
+
+SISTEMA_AVISO = (
+    "Voce e o Nexus, assistente de voz brasileiro, direto e educado. O usuario "
+    "acabou de chamar voce e agora vai falar o comando. Responda com UMA saudacao "
+    "MUITO curta (no maximo 3 palavras), neutra e cordial, convidando-o a falar. "
+    "Nada de girias nem brincadeira. Sem aspas, sem numeracao, sem explicacao, sem "
+    "emoji. Varie bastante. Exemplos: Ouvindo. / Pode falar. / Estou aqui. / Sim? / "
+    "Certo."
+)
+
+
+def _gerar_avisos_ollama(quantidade=6):
+    """Gera um lote de saudacoes curtas com a Ollama, fora do caminho critico."""
+    if _gerando_avisos.is_set():
+        return
+    _gerando_avisos.set()
+    try:
+        resposta = ollama.chat(
+            model=MODELO,
+            messages=[
+                {"role": "system", "content": SISTEMA_AVISO},
+                {"role": "user", "content": f"Gere {quantidade} saudacoes curtas e diferentes, uma por linha."},
+            ],
+            options={"temperature": 1.1, "num_predict": 80},
+        )
+        conteudo = (resposta.get("message") or {}).get("content") or ""
+        novas = []
+        for linha in conteudo.splitlines():
+            linha = linha.strip().strip("\"'").lstrip("-*0123456789. ").strip()
+            if 0 < len(linha) <= 28 and len(linha.split()) <= 3:
+                novas.append(linha)
+        with _avisos_lock:
+            _avisos.extend(novas[:quantidade])
+    except Exception:  # noqa: BLE001 - Ollama fora do ar nao pode travar a voz
+        pass
+    finally:
+        _gerando_avisos.clear()
+
+
+def aviso_de_escuta():
+    """Saudacao curta para falar ao acordar. Nunca bloqueia a escuta."""
+    with _avisos_lock:
+        if _avisos:
+            return _avisos.pop(0)
+    # Nada pronto ainda: usa o banco padrao na hora e reabastece em fundo.
+    threading.Thread(target=_gerar_avisos_ollama, daemon=True).start()
+    return random.choice(AVISOS_PADRAO)
+
+
 def rodar_modo_voz(conversa, servico=False):
     import time
     import voz
+
+    global _voz
+    _voz = voz
 
     if not voz.disponivel():
         print(voz.mensagem_indisponivel())
         return
 
-    voz.falar("Jarvis online.")
+    # Aquece o gerador de saudacoes em segundo plano: a primeira wakeword ja
+    # encontra a lista pronta, entao o aviso sai na hora e varia sozinho.
+    threading.Thread(target=_gerar_avisos_ollama, daemon=True).start()
+
+    # O Vosk aceita varias frases de ativacao; 'Nexus' e a mais curta. A
+    # saudacao nao diz o nome, senao a propria caixa acorda o Nexus.
+    voz.falar("Estou online. Diga meu nome.")
     if servico:
-        print("Servico de voz ativo. Diga 'Jarvis'.", flush=True)
+        print(f"Servico de voz ativo. Diga '{voz.WAKEWORD}'.", flush=True)
     else:
-        print("Modo voz ativo. Diga 'Jarvis' para falar. Ctrl+C encerra.", flush=True)
+        print(f"Modo voz ativo. Diga '{voz.WAKEWORD}' para falar. Ctrl+C encerra.", flush=True)
+    print("A qualquer momento, fale para interromper o que o Nexus estiver fazendo.", flush=True)
 
     while True:
         try:
             # Devolve a RAM dos modelos quando o usuario para de falar.
             voz.limpar_ocios()
-            print("Ouvindo 'Jarvis'...", flush=True)
+            print(f"Ouvindo '{voz.WAKEWORD}'...", flush=True)
             if not voz.escutar_wakeword():
                 continue
             print("Wakeword detectada.", flush=True)
-            # Grava em paralelo com o 'Pois nao?'. Antes a gravacao so
-            # começava depois que o aviso terminava, e ainda levava 6s
-            # cravados mesmo numa frase curta.
-            arquivo, gravando = voz.comecar_a_gravar(
-                atencao_inicial=voz.TEMPO_AVISO,
-            )
-            voz.falar(voz.AVISO)
+            # Grava em paralelo com a saudacao, mas so passa a valer quando
+            # 'fim_aviso' e marcado (assim que a saudacao termina de tocar).
+            # Janela fixa nao serve: aviso curto cortava o inicio do comando e
+            # aviso longo vazava o proprio aviso para a transcricao.
+            fim_aviso = threading.Event()
+            arquivo, gravando = voz.comecar_a_gravar(inicio=fim_aviso)
+            gravando.start()
+            voz.falar(aviso_de_escuta(), vigiar=False)
+            # A caixa continua soando por alguns instantes depois do processo
+            # sair; sem essa folga o rabinho da saudacao entra como comando.
+            time.sleep(0.2)
+            fim_aviso.set()
             gravando.join(timeout=voz.DURACAO_FALA + 10)
             texto = voz.transcrever_arquivo(arquivo)
+
         except KeyboardInterrupt:
             print("\nEncerrando voz.")
             break
@@ -918,32 +1214,54 @@ def rodar_modo_voz(conversa, servico=False):
         if _quer_encerrar(texto):
             voz.falar("Ate logo.")
             break
+        if _quer_parar(texto):
+            # Nada comecou ainda, mas o pedido e claro e nao vale gastar um
+            # turno do modelo para descobrir que o usuario so queria parar.
+            print("[voz] Nada a interromper.", flush=True)
+            voz.falar("Certo, parei.")
+            continue
 
         conversa[0]["content"] = REGRAS + memoria_para_prompt() + apps_para_prompt()
         conversa.append({"role": "user", "content": texto})
         global ULTIMO_PEDIDO
         ULTIMO_PEDIDO = texto
+
+        # Daqui ate a fala o microfone fica aberto: e essa a janela em que voce
+        # pode dizer 'para' e cancelar o que o Nexus estiver fazendo.
+        voz.limpar_parada()
+        _abrir_vigia()
         try:
             conversa, chamadas = rodar_turno(conversa, texto)
-            garantir_opencode(conversa, texto, chamadas)
+            if not _interrompido():
+                garantir_opencode(conversa, texto, chamadas)
         except Exception as erro:
             print(f"\nErro no turno: {erro}")
+            _fechar_vigia()
             voz.falar("Deu erro ao processar.")
+            continue
+        _fechar_vigia()
+
+        if _interrompido():
+            print("[voz] Interrompido. Voltando a ouvir a wakeword.", flush=True)
             continue
 
         resposta = extrair_resposta(conversa)
         if resposta:
-            print(f"\nJarvis: {resposta}")
+            print(f"\nNexus: {resposta}")
+            # falar() abre a propria escuta com o limiar alto e se cala no
+            # instante em que voce falar por cima.
             voz.falar(resposta)
+            if voz.interrompido():
+                print("[voz] Fala interrompida.", flush=True)
         voz.descarregar()
 
 
 def _anunciar_status():
     try:
         ollama.chat(model=MODELO, messages=[{"role": "user", "content": "ping"}])
-        arquiteto = f"Antigravity ({MODELO_ANTIGRAVITY})" if AGY else "indisponivel"
-        print(f"Jarvis online. Cerebro: {MODELO} | Especialista: {MODELO_ESPECIALISTA} | Codigo: OpenCode")
-        print(f"Arquiteto: {arquiteto}")
+        arquiteto = f"Antigravity ({MODELO_ARQUITETO})" if AGY else "indisponivel"
+        print(f"Nexus online. Cerebro: {MODELO} | Especialista: {MODELO_ESPECIALISTA} | Codigo: OpenCode")
+        print(f"Arquiteto: {arquiteto} | Executor: {MODELO_EXECUTOR}")
         print(f"Projetos: {PASTA_TRABALHO}")
         print("Digite 'sair' para encerrar.\n")
     except Exception as erro:
@@ -983,7 +1301,7 @@ def main():
             print(f"Erro no modo voz: {erro}", flush=True)
             if modo_servico:
                 return 1
-        print("\nJarvis desligado.")
+        print("\nNexus desligado.")
         return
 
     while True:
@@ -1010,7 +1328,7 @@ def main():
         except Exception as erro:
             print(f"\nErro no turno: {erro}")
 
-    print("\nJarvis desligado.")
+    print("\nNexus desligado.")
 
 
 if __name__ == "__main__":

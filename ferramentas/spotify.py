@@ -117,7 +117,7 @@ def funcao(acao: str, musica: str = "", valor: int = None):
             if _spotify.sem_token():
                 return (
                     "O Spotify ainda nao foi conectado. Rode spotify acao=conectar "
-                    "uma vez para autorizar o Jarvis."
+                    "uma vez para autorizar o Nexus."
                 )
 
             if _quer_colecao(pedido):

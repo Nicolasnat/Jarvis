@@ -1,9 +1,9 @@
-"""Plugin: lista quais aplicativos o Jarvis sabe abrir."""
+"""Plugin: lista quais aplicativos o Nexus sabe abrir."""
 from comum import ARQUIVO_APPS, ler_json, esquema
 
 NOME = "listar_apps"
 DESCRICAO = (
-    "Lista todos os aplicativos que o Jarvis consegue abrir pelo nome. "
+    "Lista todos os aplicativos que o Nexus consegue abrir pelo nome. "
     "Use quando o usuario perguntar quais programas ele tem, ou 'o que voce abre'."
 )
 PARAMETROS = esquema(

@@ -5,12 +5,12 @@
 Aqui está o plano de implementação detalhado, respeitando a regra de não criar arquivos e não rodar comandos durante o planejamento:
 
 ### ETAPA 1 - Arquitetura de plugins
-*   **Arquivos a criar:** `ferramentas/carregador.py`. Modificar `jarvis.py` para usar os plugins.
+*   **Arquivos a criar:** `ferramentas/carregador.py`. Modificar `nexus.py` para usar os plugins.
 *   **Funções e assinaturas:** `carregar_plugins(pasta: str) -> tuple[list, dict]` (retorna CATALOGO e funções).
 *   **Dependências:** Nenhuma adicional (built-ins de Python).
 *   **Integração:** `carregar_plugins` inspeciona a pasta, exige dicionários NOME, DESCRICAO, PARAMETROS e funcao. Valida BINARIO via `shutil.which`.
 *   **Segurança:** Nenhum comando shell injetado (`shell=False`).
-*   **Validação:** Rodar Jarvis e verificar log confirmando carregamento. Adicionar plugin sem binário e constatar que é ignorado.
+*   **Validação:** Rodar Nexus e verificar log confirmando carregamento. Adicionar plugin sem binário e constatar que é ignorado.
 
 ### ETAPA 2 - Memória, tarefas e lembretes
 *   **Arquivos a criar:** `ferramentas/memoria.py`, `ferramentas/tarefas.py`, `ferramentas/lembretes.py`.
@@ -25,16 +25,16 @@ Aqui está o plano de implementação detalhado, respeitando a regra de não cri
 *   **Funções e assinaturas:** `status_sistema() -> dict`, `abrir_programa(app: str)`, `fechar_programa(app: str)`.
 *   **Dependências:** pip: `psutil`. apt: `xclip` (ou `wl-clipboard`), `pulseaudio-utils`, `brightnessctl`.
 *   **Integração:** Plugins com validação em listas brancas na hora da chamada.
-*   **Segurança:** `fechar_programa` sempre aciona `confirmar_risco` no fluxo de segurança do `jarvis.py`. Sem execução arbitrária.
+*   **Segurança:** `fechar_programa` sempre aciona `confirmar_risco` no fluxo de segurança do `nexus.py`. Sem execução arbitrária.
 *   **Validação:** Tentar abrir um programa fora do `apps.json` e receber bloqueio local.
 
 ### ETAPA 4 - Voz
-*   **Arquivos a criar:** `voz.py` (ou integrado condicionalmente no `jarvis.py`).
+*   **Arquivos a criar:** `voz.py` (ou integrado condicionalmente no `nexus.py`).
 *   **Funções e assinaturas:** `escutar_wakeword() -> bool`, `transcrever() -> str`, `falar(texto: str)`.
-*   **Dependências:** pip: `faster-whisper`, `openwakeword`. apt: `espeak-ng`.
+*   **Dependências:** pip: `faster-whisper`, `vosk`. apt: `espeak-ng`.
 *   **Integração:** Flag de inicialização `--voz` muda a interface de `input()`/`print()` para loops de áudio local.
 *   **Segurança:** Execução 100% offline; áudio não trafega para a nuvem.
-*   **Validação:** Inicializar com `--voz`, falar "Jarvis", pedir a hora e ouvir a resposta em áudio.
+*   **Validação:** Inicializar com `--voz`, falar "Nexus", pedir a hora e ouvir a resposta em áudio.
 
 ### ETAPA 5 - Documentos e estudo (RAG local)
 *   **Arquivos a criar:** `ferramentas/rag.py`.
