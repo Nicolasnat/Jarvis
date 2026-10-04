@@ -129,17 +129,3 @@ def memoria_para_prompt(limite=8) -> str:
     if not linhas:
         return ""
     return "\n\nO que voce ja sabe sobre o usuario (memoria):\n" + "\n".join(linhas)
-
-
-def apps_para_prompt(limite=120) -> str:
-    """Lista os aplicativos que o Nexus pode abrir, para o modelo escolher o nome certo."""
-    apps = ler_json(ARQUIVO_APPS, {})
-    if not apps:
-        return ""
-    nomes = [nome.replace("_", " ") for nome in sorted(apps)[:limite]]
-    if not nomes:
-        return ""
-    return (
-        "\n\nAplicativos que voce pode abrir com abrir_programa "
-        "(use o nome como aparece aqui):\n" + ", ".join(nomes)
-    )

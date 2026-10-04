@@ -16,7 +16,7 @@ import ollama
 from comum import (
     PASTA_TRABALHO, PASTA_DADOS, PASTA_CONFIG, BASE_PROJETO,
     MODELO_ESPECIALISTA, resolver, esquema, TEXTO,
-    limpar_ansi, resumir_busca, memoria_para_prompt, apps_para_prompt, chave_nome,
+    limpar_ansi, resumir_busca, memoria_para_prompt, chave_nome,
 )
 from ferramentas.carregador import carregar_plugins
 from ferramentas._agenda import iniciar as iniciar_agenda
@@ -818,8 +818,8 @@ SUA DIVISAO DE TRABALHO (obrigatoria):
 5. Use 'pesquisar_na_web' para fatos atuais, noticias e documentacao. Para perguntas de conhecimento geral (biografia, historia, ciencia, matematica, programacao) prefira 'perguntar_qwen'.
 6. MEMORIA: quando o usuario pedir para voce lembrar de algo (preferencias, dados pessoais, senhas nao), chame 'lembrar_fato'. Se a resposta estiver na secao de memoria do sistema, use-a. Use 'buscar_memoria'/'esquecer_fato' quando fizer sentido.
 7. RECADOS E TAREFAS: para "me lembra daqui a X" use 'agendar_lembrete'; para listas de afazeres use 'adicionar_tarefa'/'listar_tarefas'/'concluir_tarefa'; para anotar algo solto use 'anotar'.
-8. SISTEMA: use 'status_sistema' para CPU/RAM/disco; 'abrir_programa' e 'fechar_programa' apenas com nomes da lista permitida; 'definir_volume', 'definir_brilho', 'ler_clipboard' e 'copiar_clipboard' para o restante.
-9. SPOTIFY: tocar musica/playlist e os controles (pausar, retomar, proxima, anterior, volume, 'o que esta tocando') sao SEMPRE a ferramenta 'spotify', com a 'acao' certa. Nunca use 'abrir_programa' para controlar o Spotify.
+8. SISTEMA: use 'status_sistema' para CPU/RAM/disco; 'abrir_programa' e 'fechar_programa' para apps (o nome aproximado basta, ex. 'code', 'spotify'); 'definir_volume', 'definir_brilho', 'ler_clipboard' e 'copiar_clipboard' para o restante.
+9. SPOTIFY: tocar musica/playlist e os controles de reproducao (pausar, retomar, proxima, anterior, 'o que esta tocando') sao SEMPRE a ferramenta 'spotify'. Volume: 'volume do Spotify' usa 'spotify' (acao volume); 'aumenta/abaixa o volume' sem citar o Spotify e o volume do sistema ('definir_volume'). Nunca use 'abrir_programa' para controlar o Spotify.
 10. DOCUMENTOS: use 'indexar_documentos' para carregar arquivos/pastas (txt, md, pdf, docx) e 'perguntar_documentos' para responder perguntas com base nesse conteudo. Se a pergunta for sobre um documento que o usuario citou, indexe antes de perguntar.
 
 ANTI-ALUCINACAO (obrigatoria):
@@ -1028,8 +1028,69 @@ def _ajustar_spotify(argumentos, texto):
     return argumentos
 
 
+def _corrigir_volume(nome, argumentos, texto):
+    """Desempata o volume: do sistema por padrao, do Spotify so se citado.
+
+    O modelo decide isso por conta propria e erra; a fala e a fonte da verdade.
+    """
+    baixo = (texto or "").lower()
+    tem_spotify = "spotify" in baixo
+    if nome == "spotify" and (argumentos.get("acao") or "").lower() == "volume":
+        # Sem citar o Spotify, 'aumenta o volume' e o volume do notebook. Sem
+        # valor e so uma consulta: deixamos no Spotify para nao quebrar.
+        if tem_spotify or argumentos.get("valor") is None:
+            return nome, argumentos
+        return "definir_volume", {"nivel": argumentos.get("valor")}
+    if nome == "definir_volume" and tem_spotify:
+        return "spotify", {"acao": "volume", "valor": argumentos.get("nivel")}
+    return nome, argumentos
+
+
+def _resposta_quebrada(texto) -> bool:
+    """True se o modelo 'chamou' a ferramenta como texto em vez de tool_calls.
+
+    A saida do llama3.1 varia: as vezes devolve um JSON de funcao malformado
+    (ou bem formado, mas fora do campo tool_calls) e nenhuma acao acontece.
+    """
+    texto = (texto or "").strip()
+    if not texto:
+        return False
+    if not texto.startswith(("{", "[")):
+        # 'definir_volume(50)' ou "spotify(acao='volume')": o modelo escreveu o
+        # nome da ferramenta como se fosse codigo, mas nada foi chamado.
+        achado = re.match(r"^([A-Za-z_]\w*)\s*\(", texto)
+        return bool(achado and achado.group(1) in FERRAMENTAS)
+    try:
+        dados = json.loads(texto)
+    except Exception:
+        return True
+    if isinstance(dados, dict) and "message" not in dados:
+        if dados.get("type") == "function":
+            return True
+        if "name" in dados and ("parameters" in dados or "arguments" in dados):
+            return True
+    return False
+
+
+def _chamar_modelo(conversa, tentativas=3):
+    """Chama o Ollama; insiste se vier um tool call quebrado ou resposta vazia."""
+    mensagem = {"content": ""}
+    for _ in range(tentativas):
+        r = ollama.chat(model=MODELO, messages=podar(conversa), tools=MANUAL)
+        mensagem = r["message"]
+        if mensagem.get("tool_calls"):
+            return mensagem
+        conteudo = (mensagem.get("content") or "").strip()
+        if conteudo and not _resposta_quebrada(conteudo):
+            return mensagem
+    return mensagem
+
+
 def rodar_turno(conversa, texto: str):
     chamadas = set()
+    # Resultados das ferramentas deste turno (nao do historico inteiro): sem
+    # isso o fallback podia repetir a resposta de um pedido anterior.
+    resultados_turno = []
     # Modelos pequenos repetem a mesma ferramenta no mesmo turno (o Spotify foi
     # chamado duas vezes seguidas com a mesma musica, so mudando o aparelho).
     # Cada repeticao custa um ida-e-volta ao Ollama, entao a segunda e as
@@ -1043,8 +1104,7 @@ def rodar_turno(conversa, texto: str):
             print("[nexus] Interrompido antes do proximo passo.", flush=True)
             break
         conversa = podar(conversa)
-        r = ollama.chat(model=MODELO, messages=conversa, tools=MANUAL)
-        mensagem = r["message"]
+        mensagem = _chamar_modelo(conversa)
         conversa.append(mensagem)
 
         if not mensagem.get("tool_calls"):
@@ -1057,6 +1117,7 @@ def rodar_turno(conversa, texto: str):
             argumentos = pedido["function"].get("arguments") or {}
             if nome == "spotify":
                 argumentos = _ajustar_spotify(argumentos, texto)
+            nome, argumentos = _corrigir_volume(nome, argumentos, texto)
             print(f"\n[nexus] executando {nome}({argumentos})...", flush=True)
 
             chave = _chave_chamada(nome, argumentos)
@@ -1085,17 +1146,18 @@ def rodar_turno(conversa, texto: str):
             conversa.append({"role": "tool", "content": str(resultado)})
             nomes_passo.append(nome)
             resultados_passo.append(str(resultado))
+            resultados_turno.append(str(resultado))
 
             if _interrompido():
                 print("[nexus] Interrompido: parando o turno aqui.", flush=True)
-                return conversa, chamadas
+                return conversa, chamadas, resultados_turno
 
         if nomes_passo and all(n in RESPOSTA_DIRETA for n in nomes_passo):
             # O retorno ja e a resposta: fala direto, sem outra ida ao modelo
             # (que costuma deturpar o que a ferramenta devolveu).
             conversa.append({"role": "assistant", "content": "\n".join(resultados_passo)})
             break
-    return conversa, chamadas
+    return conversa, chamadas, resultados_turno
 
 
 def garantir_opencode(conversa, texto: str, chamadas: set) -> set:
@@ -1128,14 +1190,6 @@ def extrair_resposta(conversa) -> str:
     for mensagem in reversed(conversa):
         if mensagem.get("role") == "assistant" and mensagem.get("content"):
             return mensagem["content"]
-    return ""
-
-
-def ultimo_resultado(conversa) -> str:
-    """Ultimo retorno de ferramenta, usado quando o modelo nao resume nada."""
-    for mensagem in reversed(conversa):
-        if mensagem.get("role") == "tool" and mensagem.get("content"):
-            return str(mensagem["content"])
     return ""
 
 
@@ -1184,6 +1238,28 @@ def _quer_parar(texto: str) -> bool:
     if not any(p in PALAVRAS_PARAR for p in partes):
         return False
     return all(p in PALAVRAS_PARAR or p in CORTESIA_PARAR for p in partes)
+
+
+# Concordancia curta ('ok', 'isso ai', 'valeu'). Sem isso virava pedido e o
+# modelo saia pesquisando 'Isso ai' na web. 'sim' e 'nao' ficam de fora:
+# podem ser a resposta a uma pergunta que o proprio Nexus fez.
+PALAVRAS_CONFIRMACAO = {
+    "isso", "mesmo", "ai", "ok", "okay", "beleza", "blz", "valeu", "obrigado",
+    "obrigada", "legal", "bacana", "show", "entendi", "entendido", "certo",
+    "ta", "bom", "otimo", "perfeito", "maravilha", "top",
+}
+
+
+def _e_confirmacao(texto: str) -> str:
+    """Devolve a resposta curta se a frase for so um 'ok/isso ai/valeu'."""
+    partes = chave_nome(texto or "").replace(",", " ").replace(".", " ").split()
+    if not partes or len(partes) > 3:
+        return ""
+    if not all(p in PALAVRAS_CONFIRMACAO for p in partes):
+        return ""
+    if any(p in {"obrigado", "obrigada", "valeu"} for p in partes):
+        return "De nada."
+    return "Beleza."
 
 
 # Saudacoes curtas faladas assim que a wakeword dispara. Antes era um unico
@@ -1323,8 +1399,13 @@ def rodar_modo_voz(conversa, servico=False):
             print("[voz] Nada a interromper.", flush=True)
             voz.falar("Certo, parei.")
             continue
+        confirmacao = _e_confirmacao(texto)
+        if confirmacao:
+            print(f"\nNexus: {confirmacao}", flush=True)
+            voz.falar(confirmacao)
+            continue
 
-        conversa[0]["content"] = REGRAS + memoria_para_prompt() + apps_para_prompt()
+        conversa[0]["content"] = REGRAS + memoria_para_prompt()
         conversa.append({"role": "user", "content": texto})
         global ULTIMO_PEDIDO
         ULTIMO_PEDIDO = texto
@@ -1334,7 +1415,7 @@ def rodar_modo_voz(conversa, servico=False):
         voz.limpar_parada()
         _abrir_vigia()
         try:
-            conversa, chamadas = rodar_turno(conversa, texto)
+            conversa, chamadas, resultados_turno = rodar_turno(conversa, texto)
             if not _interrompido():
                 garantir_opencode(conversa, texto, chamadas)
         except Exception as erro:
@@ -1351,7 +1432,7 @@ def rodar_modo_voz(conversa, servico=False):
         resposta = resposta_falada(extrair_resposta(conversa))
         if not resposta:
             # Modelo pequeno as vezes nao resume o que a ferramenta devolveu.
-            resposta = resposta_falada(ultimo_resultado(conversa))
+            resposta = resposta_falada("\n".join(resultados_turno))
         if not resposta:
             resposta = "Nao entendi. Pode repetir?"
         print(f"\nNexus: {resposta}")
@@ -1375,6 +1456,67 @@ def _anunciar_status():
         print(f"Nao consegui falar com o Ollama ({erro}). Ele esta rodando? Inicie com 'ollama serve'.\n")
 
 
+def conduzir_texto(conversa, texto):
+    """Roda um turno escrito e devolve (conversa, resposta)."""
+    global ULTIMO_PEDIDO
+    conversa[0]["content"] = REGRAS + memoria_para_prompt()
+    conversa.append({"role": "user", "content": texto})
+    ULTIMO_PEDIDO = texto
+    conversa, chamadas, resultados_turno = rodar_turno(conversa, texto)
+    garantir_opencode(conversa, texto, chamadas)
+    resposta = resposta_falada(extrair_resposta(conversa))
+    if not resposta:
+        resposta = resposta_falada("\n".join(resultados_turno))
+    return conversa, resposta
+
+
+def rodar_modo_escrita(conversa):
+    """Digite o comando no terminal; o Nexus responde em voz.
+
+    Serve para quem prefere escrever (mais preciso que a transcricao) mas quer
+    ouvir a resposta, por exemplo com fones ou a caixa longe do teclado.
+    """
+    import voz
+    falar = voz.disponivel()
+    if falar:
+        iniciar_agenda(voz.falar)
+        voz.falar("Modo escrita ativo. Digite o comando e eu respondo em voz.")
+    else:
+        print(voz.mensagem_indisponivel())
+        iniciar_agenda()
+
+    while True:
+        try:
+            texto = input("\nVoce: ").strip()
+        except (KeyboardInterrupt, EOFError):
+            break
+        if not texto:
+            continue
+        if texto.lower() in {"sair", "exit", "quit"}:
+            break
+        confirmacao = _e_confirmacao(texto)
+        if confirmacao:
+            print(f"\nNexus: {confirmacao}")
+            if falar:
+                voz.falar(confirmacao)
+            continue
+        try:
+            conversa, resposta = conduzir_texto(conversa, texto)
+            resposta = resposta or "Nao entendi. Pode repetir?"
+            print(f"\nNexus: {resposta}")
+            if falar:
+                voz.falar(resposta)
+                voz.descarregar()
+        except KeyboardInterrupt:
+            print("\nInterrompido.")
+        except Exception as erro:
+            print(f"\nErro no turno: {erro}")
+
+    if falar:
+        voz.falar("Ate logo.")
+    print("\nNexus desligado.")
+
+
 def main():
     aplicar_config_permissoes()
     if AGY:
@@ -1389,6 +1531,14 @@ def main():
     conversa = [{"role": "system", "content": REGRAS}]
     modo_servico = "--servico" in sys.argv
     modo_voz = "--voz" in sys.argv or modo_servico
+    modo_escrita = "--escrever" in sys.argv or "--texto-voz" in sys.argv
+
+    if modo_escrita:
+        try:
+            rodar_modo_escrita(conversa)
+        except Exception as erro:
+            print(f"Erro no modo escrita: {erro}", flush=True)
+        return
 
     if modo_voz:
         import voz
@@ -1422,17 +1572,13 @@ def main():
         if texto.lower() in {"sair", "exit", "quit"}:
             break
 
-        # Injeta a memoria relevante no prompt do sistema antes de cada turno.
-        conversa[0]["content"] = REGRAS + memoria_para_prompt() + apps_para_prompt()
-        conversa.append({"role": "user", "content": texto})
-        global ULTIMO_PEDIDO
-        ULTIMO_PEDIDO = texto
+        confirmacao = _e_confirmacao(texto)
+        if confirmacao:
+            print(f"\nNexus: {confirmacao}")
+            continue
+
         try:
-            conversa, chamadas = rodar_turno(conversa, texto)
-            garantir_opencode(conversa, texto, chamadas)
-            resposta = resposta_falada(extrair_resposta(conversa))
-            if not resposta:
-                resposta = resposta_falada(ultimo_resultado(conversa))
+            conversa, resposta = conduzir_texto(conversa, texto)
             print(f"\nNexus: {resposta or 'Nao entendi. Pode repetir?'}")
         except KeyboardInterrupt:
             print("\nInterrompido.")
