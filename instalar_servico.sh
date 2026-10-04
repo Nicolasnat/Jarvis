@@ -10,7 +10,10 @@ mkdir -p "$(dirname "$DEST")"
 sed "s|@PROJETO@|$DIR|g" "$DIR/nexus.service" > "$DEST"
 
 systemctl --user daemon-reload
-systemctl --user enable --now nexus.service
+# 'reenable' troca o alvo de instalacao antigo (default.target) pelo novo
+# (graphical-session.target) sem deixar symlink duplicado.
+systemctl --user reenable nexus.service
+systemctl --user restart nexus.service
 
 echo "Nexus instalado e ativo."
 echo "  status:  systemctl --user status nexus"
