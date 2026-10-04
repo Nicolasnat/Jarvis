@@ -26,20 +26,27 @@ Assistente de IA **local** em português do Brasil, que roda no terminal e **del
 ---
 
 ## 🧩 Como funciona
-
+ 
 ```
-Você ──► Nexus (llama3.1:8b via Ollama)
-              │
-              ├── código / projeto ──► OpenCode  ──► executa no disco
-              │        ▲
-              │        └── plano de arquitetura ◄── Antigravity (Gemini)
-              │
-              ├── conhecimento geral ─► qwen2.5:7b (Ollama)
-              ├── fatos atuais ───────► busca na web (DDGS)
-              ├── memória / tarefas / lembretes ─► dados/*.json
-              ├── sistema ────────────► psutil, pactl, xclip, apps.json
-              ├── voz ────────────────► arecord + vosk + faster-whisper
-              └── documentos ─────────► ChromaDB + nomic-embed-text
+Você ──► Nexus (Cadeia de Cérebros)
+               │
+               ├── nuvem_gratis ─► gemini-3.8-flash (Function Calling, rápido)
+               │        │
+               │        └── fallback (429/quota/5xx/timeout)
+               │
+               └── local ─► llama3.1:8b (Ollama, sempre disponível)
+                            │
+                            ├── código / projeto ──► OpenCode  ──► executa no disco
+                            │        ▲
+                            │        └── plano de arquitetura ◄── Antigravity (Gemini)
+                            │
+                            ├── conhecimento geral ─► qwen2.5:7b (Ollama)
+                            ├── fatos atuais ───────► busca na web (DDGS)
+                            ├── memória ativa ───────► nomic-embed-text (Ollama) + ChromaDB
+                            ├── memória / tarefas / lembretes ─► dados/*.json
+                            ├── sistema ────────────► psutil, pactl, xclip, apps.json
+                            ├── voz ────────────────► arecord + vosk + faster-whisper
+                            └── documentos ─────────► ChromaDB + nomic-embed-text
 ```
 
 ### Divisão de trabalho
