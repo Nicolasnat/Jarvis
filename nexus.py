@@ -878,6 +878,7 @@ PALAVRAS_PARAR = {
 CORTESIA_PARAR = {
     "pode", "poderia", "podes", "por", "favor", "vc", "voce", "ai", "entao",
     "aqui", "ja", "agora", "tudo", "esse", "essa", "isso", "obrigado", "obrigada",
+    "acao", "acao", "este", "esta", "isto", "aquilo", "cancelamento", "parada",
 }
 
 
