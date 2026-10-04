@@ -1,0 +1,18 @@
+{
+  "protegidos": [
+    "seguranca.py",
+    "config/protegidos.json",
+    "opencode-permissoes.json",
+    "nexus.service",
+    "instalar_servico.sh",
+    "ajustar_microfone.sh",
+    "scripts/aplicar_e_vigiar.sh",
+    "ferramentas/_spotify.py",
+    "config/spotify.json",
+    ".git/",
+    ".gitignore",
+    "venv/",
+    "dados/"
+  ],
+  "descricao": "Arquivos e pastas que o auto-aprimoramento NAO pode alterar. Verificacao feita por git diff --name-only contra esta lista apos o OpenCode terminar na worktree."
+}
