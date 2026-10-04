@@ -29,24 +29,24 @@ Assistente de IA **local** em português do Brasil, que roda no terminal e **del
  
 ```
 Você ──► Nexus (Cadeia de Cérebros)
-               │
-               ├── nuvem_gratis ─► gemini-3.8-flash (Function Calling, rápido)
-               │        │
-               │        └── fallback (429/quota/5xx/timeout)
-               │
-               └── local ─► llama3.1:8b (Ollama, sempre disponível)
-                            │
-                            ├── código / projeto ──► OpenCode  ──► executa no disco
-                            │        ▲
-                            │        └── plano de arquitetura ◄── Antigravity (Gemini)
-                            │
-                            ├── conhecimento geral ─► qwen2.5:7b (Ollama)
-                            ├── fatos atuais ───────► busca na web (DDGS)
-                            ├── memória ativa ───────► nomic-embed-text (Ollama) + ChromaDB
-                            ├── memória / tarefas / lembretes ─► dados/*.json
-                            ├── sistema ────────────► psutil, pactl, xclip, apps.json
-                            ├── voz ────────────────► arecord + vosk + faster-whisper
-                            └── documentos ─────────► ChromaDB + nomic-embed-text
+         │
+         ├── ATIVO (padrão): nuvem_gratis ─► gemini-3.8-flash
+         │         │
+         │         ├── código / projeto ──► OpenCode  ──► executa no disco
+         │         │        ▲
+         │         │        └── plano de arquitetura ◄── Antigravity (Gemini)
+         │         │
+         │         ├── conhecimento geral ─► qwen2.5:7b (Ollama)
+         │         ├── fatos atuais ───────► busca na web (DDGS)
+         │         ├── memória ativa ───────► nomic-embed-text (Ollama) + ChromaDB
+         │         ├── memória / tarefas / lembretes ─► dados/*.json
+         │         ├── sistema ────────────► psutil, pactl, xclip, apps.json
+         │         ├── voz ────────────────► arecord + vosk + faster-whisper
+         │         └── documentos ─────────► ChromaDB + nomic-embed-text
+         │
+         └── FALLBACK (só se nuvem falhar): local ─► llama3.1:8b (Ollama)
+                           │
+                           └── (mesmas conexões acima, mas menos capaz)
 ```
 
 ### Divisão de trabalho
