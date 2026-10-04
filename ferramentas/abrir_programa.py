@@ -1,24 +1,30 @@
-"""Plugin: abre um programa instalado.
+"""Plugin: abre um programa instalado ou site no navegador.
 
-A lista vem de config/apps.json, que pode ser gerada em tempo de execucao pelo
-plugin 'descobrir_apps' (le os .desktop do sistema). Como o usuario fala
-("abre o code", "abrir o gerenciador de arquivos"), a busca ignora acento,
-maiusculas, artigos e espaamentos antes de casar com o nome cadastrado.
+A lista de apps vem de config/apps.json (pode ser gerada pelo descobrir_apps).
+A lista de sites vem de config/sites.json (editavel pelo usuario).
+Como o usuario fala ("abre o code", "abrir o claude", "abrir whatsapp"),
+a busca ignora acento, maiusculas, artigos e espacamentos.
 """
 import difflib
 import os
 import shutil
 import subprocess
+import urllib.parse
+import urllib.request
+import re
+from pathlib import Path
 
-from comum import ARQUIVO_APPS, chave_nome, ler_json, esquema
+from comum import ARQUIVO_APPS, BASE_PROJETO, chave_nome, ler_json, esquema
 
 NOME = "abrir_programa"
 DESCRICAO = (
-    "Abre um aplicativo instalado no computador pelo nome. Use para 'abrir o X'. "
+    "Abre um aplicativo instalado ou site no navegador pelo nome. "
+    "Use para 'abrir o X' (apps) ou 'abrir site Y' (sites em config/sites.json). "
+    "Se o site nao estiver cadastrado, tenta buscar na web (fallback). "
     "Se a lista estiver desatualizada, use antes o descobrir_apps."
 )
 PARAMETROS = esquema(
-    {"app": {"type": "string", "description": "Nome do programa (ex.: vscode, spotify, terminal)"}},
+    {"app": {"type": "string", "description": "Nome do programa ou site (ex.: vscode, claude, whatsapp, https://site.com)"}},
     ["app"],
 )
 SEGURANCA = "detectar"
@@ -31,6 +37,13 @@ APELIDOS = {
     "navegador": "chrome",
     "google chrome": "chrome",
 }
+
+ARQUIVO_SITES = BASE_PROJETO / "config" / "sites.json"
+
+
+def _carregar_sites() -> dict:
+    """Carrega sites do config/sites.json."""
+    return ler_json(ARQUIVO_SITES, {})
 
 
 def _catalogo():
@@ -52,10 +65,38 @@ def _comando_para(app: str):
             "programas instalados."
         )
 
-    pedido = chave_nome(app)
+    # Verifica URL no original (antes de normalizar)
+    app_strip = (app or "").strip()
+    if app_strip.startswith(("http://", "https://", "www.")):
+        return ["xdg-open", app_strip], None
+
+    pedido = chave_nome(app_strip)
     if not pedido:
         return None, "Nao entendi qual programa abrir. Diga o nome, ex.: 'abre o vscode'."
 
+    # Se o usuario disse "site do X", "site de X", "pagina do X", "site X"
+    # trata como busca de site, nao app (evita casar com apps como 'code')
+    pedido_lower = app_strip.lower()
+    if any(p in pedido_lower for p in ("site do", "site de", "pagina do", "pagina de", "web do", "web de")):
+        # Remove as palavras-chave e usa o resto como termo de busca
+        for p in ("site do", "site de", "pagina do", "pagina de", "web do", "web de"):
+            if p in pedido_lower:
+                # Pega tudo depois da palavra-chave
+                idx = pedido_lower.index(p) + len(p)
+                termo = app_strip[idx:].strip()
+                if termo:
+                    return _buscar_e_abrir_site(termo), None
+                break
+        # Se nao extraiu termo, tenta com o pedido normalizado
+        return _buscar_e_abrir_site(pedido), None
+
+    # Verifica se e um site conhecido (config/sites.json)
+    sites = _carregar_sites()
+    if pedido in sites:
+        url = sites[pedido]
+        return ["xdg-open", url], None
+
+    # Verifica se e um app instalado
     if pedido in indice:
         return indice[pedido], None
 
@@ -72,8 +113,7 @@ def _comando_para(app: str):
     if contendo:
         return indice[min(contendo, key=len)], None
 
-    # Aproximacao so como ultimo recurso, e mais rigida em nomes curtos: e o
-    # que impede 'discord' (nao instalado) de casar com 'code'.
+    # Aproximacao so como ultimo recurso, e mais rigida em nomes curtos.
     if len(pedido) >= 4:
         corte = 0.85 if len(pedido) <= 6 else 0.72
         parecidos = difflib.get_close_matches(pedido, indice.keys(), n=1, cutoff=corte)
@@ -84,11 +124,47 @@ def _comando_para(app: str):
         if len(chave) >= 4 and pedido.endswith(chave):
             return indice[chave], None
 
-    return None, (
-        f"Nao achei '{app}' na lista de aplicativos. "
-        f"Para incluir um programa novo, rode o descobrir_apps. "
-        f"Ja tem {len(indice)} disponiveis, por exemplo: {', '.join(sorted(indice)[:10])}."
-    )
+    # FALLBACK: tenta buscar o site na web se nao achou em apps nem em sites.json
+    # Isso evita ter que cadastrar todos os sites manualmente.
+    return _buscar_e_abrir_site(app_strip), None
+
+
+def _buscar_e_abrir_site(nome: str):
+    """Busca o site na web e retorna comando para abrir o primeiro resultado.
+    Usa DuckDuckGo HTML scraping simples (sem API key)."""
+    try:
+        query = urllib.parse.quote_plus(f"{nome} site oficial")
+        url = f"https://html.duckduckgo.com/html/?q={query}"
+        headers = {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36"}
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            html = resp.read().decode("utf-8", errors="ignore")
+
+        # Extrai primeiro link de resultado (classe result__url ou similar)
+        # DuckDuckGo HTML tem links em <a class="result__url" href="...">
+        matches = re.findall(r'class="result__url"[^>]*href="([^"]+)"', html)
+        if not matches:
+            matches = re.findall(r'<a[^>]+class="[^"]*result[^"]*"[^>]+href="([^"]+)"', html)
+        if not matches:
+            # Fallback generico: primeiro link http(s) que nao seja duckduckgo
+            matches = re.findall(r'href="(https?://[^"]+)"', html)
+            matches = [m for m in matches if "duckduckgo" not in m and "bing.com" not in m]
+
+        if matches:
+            primeiro = matches[0]
+            # Limpa parametros de tracking do DDG
+            if primeiro.startswith("//duckduckgo.com/l/?"):
+                parsed = urllib.parse.urlparse(primeiro)
+                params = urllib.parse.parse_qs(parsed.query)
+                if "uddg" in params:
+                    primeiro = params["uddg"][0]
+            return ["xdg-open", primeiro]
+
+    except Exception:
+        pass
+
+    # Se tudo falhou, tenta abrir busca no Google
+    return ["xdg-open", f"https://www.google.com/search?q={urllib.parse.quote_plus(nome)}"]
 
 
 def funcao(app: str):

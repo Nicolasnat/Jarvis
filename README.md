@@ -96,8 +96,8 @@ Ferramentas opcionais só aparecem se o binário estiver instalado.
 
 ```bash
 # 1. Clone o repositório
-git clone https://github.com/Nicolasnat/Jarvis.git
-cd Jarvis
+git clone https://github.com/Nicolasnat/Nexus.git
+cd Nexus
 
 # 2. Crie e ative um ambiente virtual
 python3 -m venv venv
@@ -137,8 +137,7 @@ microfone nem fala.
 
 Diga **"Nexus"** (valem também "Hey Nexus", "Oi Nexus" e "Nexus iniciar") e
 espere o "Ouvindo.". Depois é só dizer o comando — não precisa repetir "Nexus".
-Fale por cima a qualquer momento para interromper; um "para" cancela o que
-estiver rolando.
+Fale por cima a qualquer momento para interromper; **"para"**, **"cancelar"**, **"cancela"**, **"interromper"** cancelam o que estiver rolando.
 
 > A wakeword é reconhecida por palavras-chave (Vosk), então não precisa de
 > treino. As frases aceitas ficam em `config/voz.json` (`wake_frases`) e o modelo
@@ -223,7 +222,12 @@ Você: me lembra de beber água em 20 minutos
 Você: adicione "revisar o PR" às minhas tarefas
 Você: como está o sistema?
 Você: abra o navegador
+Você: abra o claude
+Você: abra o whatsapp no navegador
+Você: abra https://github.com
 Você: deixe o volume em 40
+Você: cancelar
+Você: interromper
 Você: indexe a pasta ~/Documentos/faculdade e me explique o capítulo 3
 ```
 
@@ -258,6 +262,10 @@ As constantes ficam no topo do `nexus.py`:
 As listas `BLOQUEIOS`, `CREDENCIAIS`, `CONFIRMACOES` e `CAMINHOS_PROIBIDOS` definem a política de segurança.
 
 A lista de programas que o Nexus pode abrir/fechar fica em [`config/apps.json`](config/apps.json).
+
+A lista de sites fica em [`config/sites.json`](config/sites.json) — voce pode editar para adicionar/remover sites. Formato: `{"nome": "https://url"}`.
+
+Se o site nao estiver no `sites.json`, o Nexus **busca na web (DuckDuckGo)** e abre o primeiro resultado (fallback automatico). Isso evita ter que cadastrar tudo manualmente.
 
 ### 📦 Descobrir aplicativos
 
@@ -327,13 +335,37 @@ Nexus/
 | `agendar_lembrete` / `listar_lembretes` / `cancelar_lembrete` | Lembretes com notificação |
 | `anotar` | Anotações rápidas por dia |
 | `status_sistema` | CPU, RAM, disco, uptime e bateria |
-| `abrir_programa` / `fechar_programa` | Abre/fecha programas da lista permitida |
+| `abrir_programa` / `fechar_programa` | Abre/fecha programas e **sites** (ex.: "abre o claude", "abre whatsapp", "abre https://site.com"). Sites ficam em `config/sites.json` (editavel). Se o site nao estiver la, **busca na web automaticamente** (fallback). Se o navegador estiver fechado, abre automaticamente. |
 | `descobrir_apps` / `listar_apps` | Escaneia os apps instalados e lista os disponíveis |
 | `spotify` | Toca música ou playlist pelo nome (casa a playlist mais parecida), pausar, próxima, volume *(exige Spotify Premium)* |
 | `definir_volume` | Volume do sistema (0–100) |
 | `definir_brilho` | Brilho da tela (requer `brightnessctl`) *(opcional)* |
 | `ler_clipboard` / `copiar_clipboard` | Área de transferência |
 | `indexar_documentos` / `perguntar_documentos` | RAG local sobre seus arquivos |
+| `auto_aprimoramento` | **Auto-aprimoramento supervisionado**: corrige bugs ou adiciona funcoes no proprio Nexus. Worktree isolada, testes, aprovacao, merge + vigia systemd com rollback automatico. |
+
+
+## 🛡️ Auto-Aprimoramento Supervisionado
+
+O Nexus pode modificar seu **proprio codigo** de forma segura:
+
+1. **Voce pede**: "corrige esse bug no seu codigo", "adiciona funcao X em voce", "melhore o nexus"
+2. **Worktree isolada**: cria `~/projetos/.nexus-dev/<id>` (git worktree), branch `auto/<id>-<slug>`
+3. **OpenCode trabalha** na copia com as mesmas permissoes e seguranca
+4. **Validacao**: roda `python nexus.py --autoteste` (sem Ollama, sem microfone, sem dados/)
+5. **Verificacao de protegidos**: `git diff` contra `config/protegidos.json` - se tocou, REJEITA
+6. **Apresentacao**: diff stat, arquivos, resultado testes, riscos (marca "NUCLEO" se nexus.py, voz.py, comum.py, interface/)
+7. **Aprovacao**: seu "sim" via `confirmar_risco` (terminal) ou popup (interface)
+8. **Aplicacao**: merge fast-forward, tag `nexus-depois-<id>`, roda `scripts/aplicar_e_vigiar.sh`
+9. **Vigia**: reinicia systemd, espera 60s, checa `systemctl is-active` + `dados/saude.ok` (timestamp recente); rollback automatico se falhar
+10. **Registro**: `dados/auto_aprimoramentos.json` (id, data, descricao, status, arquivos, tags)
+
+**Frases de historico/desfazer:**
+- "o que voce mudou em si mesmo?" -> mostra historico
+- "desfaz a ultima mudança" -> rollback para tag anterior (com confirmacao)
+
+**Arquivos protegidos (nao alterados pelo auto-aprimoramento):**
+`seguranca.py`, `config/protegidos.json`, `opencode-permissoes.json`, `nexus.service`, `instalar_servico.sh`, `ajustar_microfone.sh`, `scripts/aplicar_e_vigiar.sh`, `ferramentas/_spotify.py`, `config/spotify.json`, `.git/`, `.gitignore`, `venv/`, `dados/`.
 
 ---
 
@@ -341,6 +373,7 @@ Nexus/
 
 - [x] Entrada e saída por voz
 - [x] Memória persistente entre sessões
+- [x] Auto-aprimoramento supervisionado
 - [ ] Suporte a Windows e macOS
 - [ ] Testes automatizados para o roteamento de intenção e a política de segurança
 

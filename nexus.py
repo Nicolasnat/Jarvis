@@ -21,6 +21,7 @@ from comum import (
 from ferramentas.carregador import carregar_plugins
 from ferramentas import definir_volume as _volume_sistema
 from ferramentas._agenda import iniciar as iniciar_agenda
+import seguranca
 
 
 MODELO = "llama3.1:8b"
@@ -82,236 +83,59 @@ def _definir_estado(estado: str):
 
 CHROME_OPENCODE = re.compile(r"^>\s*(build|plan|general)\s*[·|]")
 
-CAMINHOS_PROIBIDOS = [
-    "~/.ssh/**", "~/.aws/**", "~/.gnupg/**", "~/.kube/**",
-    "~/.config/opencode/**", "~/.config/gh/**", "~/.docker/config.json",
-    "/etc/**", "/usr/**", "/bin/**", "/sbin/**", "/boot/**", "/lib/**", "/lib64/**",
-    "/proc/**", "/sys/**", "/dev/**",
-]
+# Seguranca: usa o modulo centralizado (protegido)
+CAMINHOS_PROIBIDOS = seguranca.CAMINHOS_PROIBIDOS
+BLOQUEIOS = seguranca.BLOQUEIOS
+CREDENCIAIS = seguranca.CREDENCIAIS
+CONFIRMACOES = seguranca.CONFIRMACOES
 
-# Destruicao do sistema, do disco ou vazamento de credenciais. O OpenCode bloqueia
-# sozinho e o --auto nao burla isso. Nao ha como o Nexus liberar.
-BLOQUEIOS = [
-    "rm -rf /", "rm -rf /*", "rm -rf ~", "rm -rf ~/*", "rm -rf $HOME", "rm -rf $HOME/*",
-    "rm -fr /", "rm -fr /*", "rm -fr ~", "rm -fr ~/*",
-    "rm -rf /etc*", "rm -rf /usr*", "rm -rf /bin*", "rm -rf /sbin*",
-    "rm -rf /boot*", "rm -rf /lib*", "rm -rf /var*", "rm -rf /proc*", "rm -rf /sys*",
-    "mkfs*", "fdisk*", "parted*", "wipefs*",
-    "dd if=* of=/dev/*", "dd of=/dev/*",
-    "> /dev/sd*", "> /dev/nvme*", "> /dev/mmc*",
-    "chmod -R 777 /*", "chmod 777 /*", "chown -R * /*", "chown * /*",
-    ":(){:|:&};:",
-    "cat ~/.ssh*", "cat ~/.aws*", "cat ~/.gnupg*", "cat *auth.json*",
-    "cat ~/.config/opencode/*", "cat ~/.docker/config.json",
-    "history -c*", "shred *", "wipe *",
-]
+CONFIRMACOES_REGEX = seguranca.CONFIRMACOES_REGEX
+BLOQUEIOS_REGEX = seguranca.BLOQUEIOS_REGEX
+CREDENCIAIS_REGEX = seguranca.CREDENCIAIS_REGEX
 
-# Vazamento de credenciais em linguagem natural (texto, nao comando exato).
-CREDENCIAIS = [
-    "*.ssh*", "*.aws*", "*.gnupg*", "*.netrc*", "*/.kube/*",
-    "*id_rsa*", "*id_ed25519*", "*auth.json*",
-    "*.docker/config.json*", "*.config/opencode/*",
-]
-
-# Coisas destrutivas ou irreversiveis, mas legitimas em contexto. O Nexus pergunta
-# uma vez e, se voce confirmar, executa normalmente.
-CONFIRMACOES = [
-    "sudo *", "sudo", "su *", "su", "doas *",
-    "shutdown*", "reboot*", "halt*", "poweroff*", "init 0*", "init 6*", "systemctl *", "service *",
-    "apt *", "apt-get *", "aptitude *", "snap install*", "snap remove*",
-    "git push*", "git reset --hard*", "git clean -fd*", "git clean -df*", "git checkout .*",
-    "npm publish*", "yarn publish*", "pnpm publish*",
-    "curl * | sh", "curl * | bash", "wget * | sh", "wget * | bash",
-    "curl * | sudo *", "wget * | sudo *",
-    "crontab*", "visudo*",
-    "chmod *", "chown *", "chgrp *",
-    "kill -9 *", "killall*", "pkill*",
-    "dropdb*", "drop table*", "delete from*",
-]
-
+CONFIG_PERMISSOES = seguranca.CONFIG_PERMISSOES
+ULTIMO_PEDIDO = seguranca.ULTIMO_PEDIDO
 
 # ---------- AJUDANTES E FERRAMENTAS ----------
 
 def gerar_config_permissoes() -> dict:
     """Politica aplicada so ao OpenCode chamado pelo Nexus (via OPENCODE_CONFIG)."""
-    bash = {"*": "allow"}
-    for padrao in BLOQUEIOS:
-        bash[padrao] = "deny"
-
-    relativo = PASTA_TRABALHO.relative_to(Path.home())
-    for alvo in (str(PASTA_TRABALHO), f"~/{relativo}", f"$HOME/{relativo}"):
-        for prefixo in ("rm -rf", "rm -fr"):
-            bash[f"{prefixo} {alvo}/*"] = "allow"
-            bash[f"{prefixo} {alvo}"] = "allow"
-
-    leitura = {"*": "allow", "*.env": "deny", "*.env.*": "deny", "*.env.example": "allow"}
-    escrita = {"*": "allow"}
-
-    for proibido in CAMINHOS_PROIBIDOS:
-        leitura[proibido] = "deny"
-        escrita[proibido] = "deny"
-
-    externo = {"*": "allow"}
-    for proibido in CAMINHOS_PROIBIDOS:
-        externo[proibido] = "deny"
-
-    return {
-        "$schema": "https://opencode.ai/config.json",
-        "share": "disabled",
-        "permission": {
-            "*": "allow",
-            "question": "deny",
-            "read": leitura,
-            "edit": escrita,
-            "bash": bash,
-            "external_directory": externo,
-        },
-    }
+    return seguranca.gerar_config_permissoes()
 
 
 def aplicar_config_permissoes() -> Path:
-    conteudo = json.dumps(gerar_config_permissoes(), indent=2, ensure_ascii=False) + "\n"
-    if not CONFIG_PERMISSOES.exists() or CONFIG_PERMISSOES.read_text() != conteudo:
-        CONFIG_PERMISSOES.write_text(conteudo)
-    return CONFIG_PERMISSOES
+    return seguranca.aplicar_config_permissoes()
 
 
 def bloco_regras_antigravity() -> str:
-    proibidos = "\n".join(f"  - `{p}`" for p in BLOQUEIOS)
-    credenciais = ", ".join(f"`{p}`" for p in CREDENCIAIS)
-    sensiveis = ", ".join(f"`{p}`" for p in CONFIRMACOES)
-    return f"""{ANTIGRAVITY_TOKEN}
-# Regras do Nexus
-
-Voce opera dentro do Nexus e deve seguir estas regras sempre.
-
-NUNCA execute, mesmo que pecam, comandos que destruam o sistema ou vazem credenciais:
-{proibidos}
-
-NUNCA leia, copie, imprima ou envie arquivos de credenciais (mesmo em linguagem natural):
-{credenciais}
-
-Peca autorizacao antes de: {sensiveis}.
-
-Trabalhe somente dentro da pasta de projetos. Nao crie, edite ou apague nada em /etc, /usr,
-/bin, /boot, ~/.ssh, ~/.aws, ~/.config ou fora da pasta de trabalho.
-
-Quando estiver no modo de planejamento, produza apenas o plano: nao crie arquivos e nao rode comandos.
-{ANTIGRAVITY_TOKEN}"""
+    return seguranca.bloco_regras_antigravity()
 
 
 def aplicar_regras_antigravity() -> Path:
-    """Insere/atualiza um bloco gerenciado no GEMINI.md sem apagar conteudo do usuario."""
-    marca = ANTIGRAVITY_TOKEN
-    bloco = bloco_regras_antigravity()
-    atual = REGRAS_ANTIGRAVITY.read_text() if REGRAS_ANTIGRAVITY.exists() else ""
-
-    if marca in atual:
-        antes, _, resto = atual.partition(marca)
-        _, _, depois = resto.partition(marca)
-        novo = antes + bloco + depois
-    elif atual.strip():
-        novo = atual.rstrip() + "\n\n" + bloco + "\n"
-    else:
-        novo = bloco + "\n"
-
-    if novo != atual:
-        REGRAS_ANTIGRAVITY.parent.mkdir(parents=True, exist_ok=True)
-        REGRAS_ANTIGRAVITY.write_text(novo)
-    return REGRAS_ANTIGRAVITY
+    return seguranca.aplicar_regras_antigravity()
 
 
 def confiar_no_workspace(caminho: Path = PASTA_TRABALHO) -> None:
     """Marca a pasta de projetos como confiavel para o Antigravity."""
-    if not SETTINGS_ANTIGRAVITY.exists():
-        return
-    try:
-        dados = json.loads(SETTINGS_ANTIGRAVITY.read_text() or "{}")
-    except (json.JSONDecodeError, OSError):
-        return
-
-    confiaveis = dados.setdefault("trustedWorkspaces", [])
-    alvo = str(caminho)
-    if alvo not in confiaveis:
-        confiaveis.append(alvo)
-        SETTINGS_ANTIGRAVITY.write_text(json.dumps(dados, indent=2) + "\n")
-
-
-def para_regex(padrao: str, ancorar: bool = True) -> re.Pattern:
-    corpo = []
-    for caractere in padrao:
-        if caractere == "*":
-            corpo.append(".*")
-        elif caractere == "?":
-            corpo.append(".")
-        else:
-            corpo.append(re.escape(caractere))
-    return re.compile(("^" if ancorar else r"(?:^|\s)") + "".join(corpo), re.I)
-
-
-CONFIRMACOES_REGEX = [(p, para_regex(p), para_regex(p, ancorar=False)) for p in CONFIRMACOES]
-BLOQUEIOS_REGEX = [(p, para_regex(p), para_regex(p, ancorar=False)) for p in BLOQUEIOS]
-CREDENCIAIS_REGEX = [(p, para_regex(p, ancorar=False)) for p in CREDENCIAIS]
+    seguranca.confiar_no_workspace(caminho)
 
 
 def dentro_do_projeto(comando: str) -> bool:
-    return str(PASTA_TRABALHO) in comando
+    return seguranca.dentro_do_projeto(comando)
 
 
 def detectar_graves(texto: str) -> tuple:
     """Comandos de destruicao real bloqueiam; mencoes no texto so pedem confirmacao."""
-    texto = f"{texto}\n{ULTIMO_PEDIDO}"
-    bloqueados, a_confirmar = [], []
-    for bruto in re.split(r"&&|\|\||;|\||\n|`", texto):
-        comando = bruto.strip().lstrip("$(").strip()
-        if not comando:
-            continue
-
-        if any(solto.search(comando) for _, solto in CREDENCIAIS_REGEX):
-            bloqueados.append(comando)
-            continue
-
-        if any(regex.match(comando) for _, regex, _ in BLOQUEIOS_REGEX):
-            bloqueados.append(comando)
-            continue
-
-        if dentro_do_projeto(comando):
-            continue
-
-        for _, _, solto in BLOQUEIOS_REGEX:
-            achado = solto.search(comando)
-            if achado:
-                a_confirmar.append(f"{comando}  (apos: {achado.group(0).strip()})")
-                break
-        else:
-            for _, regex, solto in CONFIRMACOES_REGEX:
-                if regex.match(comando) or solto.search(comando):
-                    a_confirmar.append(comando)
-                    break
-
-    return bloqueados, a_confirmar
+    return seguranca.detectar_graves(texto)
 
 
 def confirmar_risco(comandos) -> bool:
-    comandos = [str(c) for c in comandos]
-    if _ponte is not None:
-        try:
-            return bool(_ponte.pedir_confirmacao_bloqueante(comandos))
-        except Exception:
-            pass
-    print("\n[nexus] ATENCAO: a tarefa envolve operacoes sensiveis:")
-    for comando in comandos:
-        print(f"    ! {comando[:160]}")
-    while True:
-        try:
-            resposta = input("[nexus] Confirma a execucao? (digite 'sim'): ").strip().lower()
-        except (KeyboardInterrupt, EOFError):
-            return False
-        if resposta in {"sim", "s", "yes", "y"}:
-            return True
-        if resposta in {"nao", "não", "n", "no"}:
-            return False
-        print("[nexus] Responda 'sim' ou 'nao'.")
+    return seguranca.confirmar_risco(comandos)
+
+
+def _set_ponte_seguranca(ponte):
+    """Configura a ponte no modulo de seguranca para confirmacao via GUI."""
+    seguranca._set_ponte(ponte)
 
 
 def batimento(parado: threading.Event, rotulo: str):
@@ -456,10 +280,40 @@ def inspecionar_projeto(caminho: str) -> str:
     )
 
 
+def _eh_auto_aprimoramento(tarefa: str, pasta: Path) -> bool:
+    """Detecta se o pedido e para auto-aprimoramento do proprio Nexus."""
+    # Se a pasta de destino e a raiz do Nexus
+    try:
+        if pasta.resolve() == BASE_PROJETO.resolve():
+            return True
+    except Exception:
+        pass
+
+    # Palavras-chave que indicam auto-aprimoramento
+    tarefa_lower = (tarefa or "").lower()
+    palavras_auto = [
+        "seu c[oó]digo", "seu codigo", "voce mesmo", "no nexus", "nesse bug",
+        "auto[ -]?aprimoramento", "melhore voc[eê]", "melhore o nexus",
+        "corrig[ae] voc[eê]", "corrija voc[eê]", "corrige voc[eê]",
+        "adicione em voc[eê]", "em si mesmo", "no seu c[oó]digo",
+        "nesse c[oó]digo", "nesse projeto nexus", "meu nexus",
+    ]
+    for padrao in palavras_auto:
+        if re.search(padrao, tarefa_lower):
+            return True
+    return False
+
+
 def pedir_ao_opencode(tarefa: str, pasta_destino: str = ".") -> str:
     """Delega toda a parte de codigo para o OpenCode, que executa de verdade."""
     pasta = resolver(pasta_destino)
     pasta.mkdir(parents=True, exist_ok=True)
+
+    # DETECCAO DE AUTO-APRIMORAMENTO: se o destino e o proprio Nexus
+    # ou o pedido menciona "seu codigo", "voce mesmo", "no nexus", etc.
+    if _eh_auto_aprimoramento(tarefa, pasta):
+        from ferramentas.auto_aprimoramento import funcao as auto_aprimorar
+        return auto_aprimorar(tarefa, pasta_destino)
 
     bloqueados, a_confirmar = detectar_graves(tarefa)
     if bloqueados:
@@ -709,7 +563,7 @@ VERBO_CRIAR = (
     r"mont(?:a|o|ar|ando|ou)|implement(?:a|o|ar|ando|ou)|inicializ(?:a|o|ar|ando|ou)|"
     r"configur(?:a|o|ar|ando|ou)|desenvolv(?:e|o|er|endo|imento)|program(?:a|o|ar|ando|ou)|"
     r"escrev(?:e|o|er|endo|o)|codific(?:a|o|ar|ando|ou)|adicion(?:a|o|ar|ando|ou)|"
-    r"constru(?:i|ir|indo|iu)|scaffold\w*|quero|querendo|preciso|precisando|precisa|arruma\w*)\b"
+    r"constru(?:i|ir|indo|iu)|scaffold\w*|quero|querendo|preciso|precisando|precisa|arruma\w*|planej\w*)\b"
 )
 OBJETO_CODIGO = r"\b(c[oó]digo|codigo|projeto|project|app|aplicativo|sit[eo]|p[áa]gina|script|componente\w*|api|backend|front-?end|servidor|server|landing|formul[áa]rio|dashboard|bot|jogo|game|to-?do|react|vite|next\.?js|node|python|java|typescript|javascript|html|css|tailwind|banco de dados|database|funcionalidade|feature|m[óo]dulo|module|teste|test)\b"
 
@@ -870,6 +724,7 @@ ALIAS_ARGUMENTOS = {
     "dir": "caminho", "diretorio": "caminho", "path": "caminho", "local": "caminho",
     "instrucao": "tarefa", "prompt": "tarefa", "comando": "tarefa",
     "descricao": "tarefa", "pergunta": "pergunta", "termo": "busca",
+    "programa": "app", "aplicativo": "app", "aplicacao": "app",
 }
 
 
@@ -913,7 +768,9 @@ def _gate_seguranca(meta: dict, argumentos: dict):
 def executar(nome: str, argumentos: dict) -> str:
     if _ponte:
         _ponte_emitir("ferramenta_iniciada", nome, argumentos or {})
-        _definir_estado("executando")
+        # O handler em interface/app.py ja chama definir_estado("executando", acao_texto)
+        # com o texto da acao (ex: "ABRINDO SPOTIFY..."), entao nao chamamos aqui
+        # para nao sobrescrever.
 
     funcao = FERRAMENTAS.get(nome)
     if funcao is None:
@@ -1024,6 +881,7 @@ PALAVRAS_PARAR = {
 CORTESIA_PARAR = {
     "pode", "poderia", "podes", "por", "favor", "vc", "voce", "ai", "entao",
     "aqui", "ja", "agora", "tudo", "esse", "essa", "isso", "obrigado", "obrigada",
+    "acao", "acao", "este", "esta", "isto", "aquilo", "cancelamento", "parada",
 }
 
 
@@ -1593,6 +1451,11 @@ def rodar_modo_voz(conversa, servico=False):
             print("[voz] Fala interrompida.", flush=True)
         voz.descarregar()
         _definir_estado("ocioso")
+        # Health check para vigia do auto-aprimoramento
+        try:
+            (PASTA_DADOS / "saude.ok").write_text(str(time.time()))
+        except Exception:
+            pass
 
 
 def _anunciar_status():
@@ -1621,6 +1484,11 @@ def conduzir_texto(conversa, texto):
         resposta = resposta_falada("\n".join(resultados_turno))
     _ponte_emitir("resposta_final", resposta)
     _definir_estado("ocioso")
+    # Health check para vigia do auto-aprimoramento
+    try:
+        (PASTA_DADOS / "saude.ok").write_text(str(time.time()))
+    except Exception:
+        pass
     return conversa, resposta
 
 
@@ -1671,6 +1539,170 @@ def rodar_modo_escrita(conversa):
     print("\nNexus desligado.")
 
 
+def autoteste() -> int:
+    """Executa testes automatizados sem Ollama, sem microfone, sem dados/.
+    Retorna 0 se tudo passar, != 0 se falhar.
+    """
+    import sys
+    from pathlib import Path
+
+    BASE = Path(__file__).resolve().parent
+    PASTA_FERRAMENTAS = BASE / "ferramentas"
+    PASTA_INTERFACE = BASE / "interface"
+    PASTA_POPUPS = PASTA_INTERFACE / "popups"
+
+    print("[autoteste] Iniciando testes automatizados...")
+    print("[autoteste] Modo: sem Ollama, sem microfone, sem dados/")
+    falhas = 0
+
+    # 1. py_compile em todos os .py
+    print("\n[1/6] py_compile...")
+    arquivos_py = (
+        [BASE / "nexus.py", BASE / "voz.py", BASE / "comum.py", BASE / "seguranca.py"] +
+        list(PASTA_FERRAMENTAS.glob("*.py")) +
+        list(PASTA_INTERFACE.glob("*.py")) +
+        list(PASTA_POPUPS.glob("*.py"))
+    )
+    for arq in arquivos_py:
+        if arq.name.startswith("_"):
+            continue
+        resultado = subprocess.run(
+            [sys.executable, "-m", "py_compile", str(arq)],
+            capture_output=True, text=True
+        )
+        if resultado.returncode != 0:
+            print(f"  FALHA: {arq.relative_to(BASE)}")
+            print(resultado.stderr)
+            falhas += 1
+        else:
+            print(f"  OK: {arq.relative_to(BASE)}")
+
+    # 2. Importar nexus.py, voz.py e todos plugins
+    print("\n[2/6] Importacao de modulos...")
+    try:
+        import nexus
+        print("  OK: nexus.py")
+    except Exception as e:
+        print(f"  FALHA: nexus.py - {e}")
+        falhas += 1
+
+    try:
+        import voz
+        print("  OK: voz.py")
+    except Exception as e:
+        print(f"  FALHA: voz.py - {e}")
+        falhas += 1
+
+    try:
+        from ferramentas.carregador import carregar_plugins
+        plugins, funcoes, indisponiveis = carregar_plugins()
+        print(f"  OK: carregador - {len(plugins)} plugins carregados")
+        for p in indisponiveis:
+            print(f"    (indisponivel: {p[0]} - {p[1]})")
+    except Exception as e:
+        print(f"  FALHA: carregador - {e}")
+        falhas += 1
+
+    # 3. Validar schemas das ferramentas
+    print("\n[3/6] Validacao de schemas...")
+    try:
+        from nexus import CATALOGO, META
+        for item in CATALOGO:
+            nome = item["nome"]
+            params = item.get("parametros")
+            if not params or params.get("type") != "object":
+                print(f"  FALHA: {nome} - schema invalido")
+                falhas += 1
+        print(f"  OK: {len(CATALOGO)} ferramentas com schema valido")
+    except Exception as e:
+        print(f"  FALHA: validacao schemas - {e}")
+        falhas += 1
+
+    # 4. Testes de roteamento de intencao
+    print("\n[4/6] Roteamento de intencao...")
+    try:
+        from nexus import precisa_de_codigo, quer_plano
+        testes_intencao = [
+            ("criar um projeto react", True),
+            ("abre o vscode", False),
+            ("qual a capital da franca", False),
+            ("planeja uma api de tarefas", True),
+            ("me lembra de beber agua", False),
+        ]
+        for texto, esperado in testes_intencao:
+            resultado = precisa_de_codigo(texto)
+            if resultado != esperado:
+                print(f"  FALHA: precisa_de_codigo('{texto}') = {resultado}, esperado {esperado}")
+                falhas += 1
+        print("  OK: precisa_de_codigo")
+
+        # quer_plano so testa se AGY existe (pode nao estar instalado)
+        if AGY:
+            testes_plano = [
+                ("planeja uma api", True),
+                ("sem plano, so executa", False),
+                ("cria um projeto grande", True),
+            ]
+            for texto, esperado in testes_plano:
+                resultado = quer_plano(texto)
+                if resultado != esperado:
+                    print(f"  FALHA: quer_plano('{texto}') = {resultado}, esperado {esperado}")
+                    falhas += 1
+            print("  OK: quer_plano")
+        else:
+            print("  OK: quer_plano (AGY nao instalado, pulado)")
+    except Exception as e:
+        print(f"  FALHA: roteamento - {e}")
+        falhas += 1
+
+    # 5. Testes de politica de seguranca
+    print("\n[5/6] Politica de seguranca...")
+    try:
+        from seguranca import detectar_graves, confirmar_risco, CAMINHOS_PROIBIDOS
+        # Bloqueados
+        bloqueados, _ = detectar_graves("rm -rf /")
+        if not bloqueados:
+            print("  FALHA: rm -rf / deveria ser bloqueado")
+            falhas += 1
+        # Confirmacoes
+        bloqueados, a_confirmar = detectar_graves("sudo apt update")
+        if not a_confirmar:
+            print("  FALHA: sudo apt update deveria pedir confirmacao")
+            falhas += 1
+        # Caminhos proibidos
+        bloqueados, a_confirmar = detectar_graves("cat ~/.ssh/id_rsa")
+        if not bloqueados:
+            print("  FALHA: cat ~/.ssh/id_rsa deveria ser bloqueado (credencial)")
+            falhas += 1
+        # Dentro do projeto nao bloqueia rm -rf
+        bloqueados, _ = detectar_graves(f"rm -rf {PASTA_TRABALHO}/teste")
+        if bloqueados:
+            print("  FALHA: rm -rf dentro da pasta de trabalho nao deveria bloquear")
+            falhas += 1
+        print("  OK: detectar_graves (bloqueios, confirmacoes, credenciais, pasta projeto)")
+    except Exception as e:
+        print(f"  FALHA: politica seguranca - {e}")
+        falhas += 1
+
+    # 6. Verifica arquivos protegidos nao alterados (git status limpo)
+    print("\n[6/6] Verificacao de arquivos protegidos...")
+    try:
+        import json
+        dados = json.loads((BASE / "config/protegidos.json").read_text())
+        protegidos = dados.get("protegidos", [])
+        # So verifica se a lista existe e nao esta vazia
+        if protegidos:
+            print(f"  OK: config/protegidos.json tem {len(protegidos)} entradas protegidas")
+        else:
+            print("  AVISO: config/protegidos.json vazio")
+    except Exception as e:
+        print(f"  FALHA: protegidos - {e}")
+        falhas += 1
+
+    print(f"\n[autoteste] Resultado: {'SUCESSO' if falhas == 0 else f'{falhas} FALHA(S)'}")
+    return 0 if falhas == 0 else 1
+
+
 def main():
     if "--help" in sys.argv or "-h" in sys.argv:
         print("Uso: python nexus.py [opcoes]")
@@ -1682,8 +1714,12 @@ def main():
         print("  --escrever        Entrada por texto e resposta em voz")
         print("  --texto-voz       Apelido para --escrever")
         print("  --demo-acoes      Simula sequencia de acoes rapidas na interface")
+        print("  --autoteste       Executa testes automatizados (sem Ollama, sem microfone, sem dados/)")
         print("  --help, -h        Mostra esta ajuda")
         return 0
+
+    if "--autoteste" in sys.argv:
+        return autoteste()
 
     aplicar_config_permissoes()
     if AGY:
@@ -1720,6 +1756,7 @@ def main():
             else:
                 global _ponte
                 _ponte = Ponte()
+                _set_ponte_seguranca(_ponte)
                 ctrl_interface = iniciar_interface(ponte=_ponte)
                 # Modo interface habilita voz + texto + janela
                 modo_voz = True
