@@ -47,7 +47,7 @@ PARAMETROS = esquema(
 SEGURANCA = "detectar"
 
 # Palavras que indicam que o usuario quer uma colecao, nao uma faixa solta.
-COLECAO = ("playlist", "playlists", "minha playlist", "album", "álbum")
+COLECAO = ("playlist", "playlists", "minha playlist", "album", "álbum", "lista")
 
 
 def _quer_colecao(pedido: str) -> bool:
