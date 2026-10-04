@@ -280,10 +280,40 @@ def inspecionar_projeto(caminho: str) -> str:
     )
 
 
+def _eh_auto_aprimoramento(tarefa: str, pasta: Path) -> bool:
+    """Detecta se o pedido e para auto-aprimoramento do proprio Nexus."""
+    # Se a pasta de destino e a raiz do Nexus
+    try:
+        if pasta.resolve() == BASE_PROJETO.resolve():
+            return True
+    except Exception:
+        pass
+
+    # Palavras-chave que indicam auto-aprimoramento
+    tarefa_lower = (tarefa or "").lower()
+    palavras_auto = [
+        "seu c[oó]digo", "seu codigo", "voce mesmo", "no nexus", "nesse bug",
+        "auto[ -]?aprimoramento", "melhore voc[eê]", "melhore o nexus",
+        "corrig[ae] voc[eê]", "corrija voc[eê]", "corrige voc[eê]",
+        "adicione em voc[eê]", "em si mesmo", "no seu c[oó]digo",
+        "nesse c[oó]digo", "nesse projeto nexus", "meu nexus",
+    ]
+    for padrao in palavras_auto:
+        if re.search(padrao, tarefa_lower):
+            return True
+    return False
+
+
 def pedir_ao_opencode(tarefa: str, pasta_destino: str = ".") -> str:
     """Delega toda a parte de codigo para o OpenCode, que executa de verdade."""
     pasta = resolver(pasta_destino)
     pasta.mkdir(parents=True, exist_ok=True)
+
+    # DETECCAO DE AUTO-APRIMORAMENTO: se o destino e o proprio Nexus
+    # ou o pedido menciona "seu codigo", "voce mesmo", "no nexus", etc.
+    if _eh_auto_aprimoramento(tarefa, pasta):
+        from ferramentas.auto_aprimoramento import funcao as auto_aprimorar
+        return auto_aprimorar(tarefa, pasta_destino)
 
     bloqueados, a_confirmar = detectar_graves(tarefa)
     if bloqueados:
