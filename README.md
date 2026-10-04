@@ -43,15 +43,16 @@ Você ──► Nexus (llama3.1:8b via Ollama)
 ```
 
 ### Divisão de trabalho
-
+ 
 | Papel | Ferramenta | Responsabilidade |
 |---|---|---|
-| Cérebro | `llama3.1:8b` (Ollama) | Conversa, interpreta o pedido, escolhe ferramentas |
+| Cérebro (nuvem) | `gemini-3.8-flash` (Gemini gratuito) | Conversa principal, escolhe ferramentas, function calling |
+| Cérebro (local) | `llama3.1:8b` (Ollama) | Fallback quando nuvem indisponível / modo privado |
 | Especialista | `qwen2.5:7b` (Ollama) | Perguntas de conhecimento e raciocínio |
 | Executor de código | OpenCode | Cria/altera projetos e roda comandos de verdade |
 | Arquiteto | Antigravity (`agy`) | Gera o plano de implementação (sem criar arquivos) |
 | Segunda opinião | Claude Code (opcional) | Revisa código quando o usuário pede |
-| Embeddings | `nomic-embed-text` (Ollama) | Vetoriza documentos para o RAG local |
+| Embeddings | `nomic-embed-text` (Ollama) | Vetoriza documentos (RAG + memória ativa) |
 
 ### Garantias contra "alucinação"
 
@@ -272,33 +273,95 @@ Você: indexe a pasta ~/Documentos/faculdade e me explique o capítulo 3
 Para encerrar, digite `sair`.
 
 ### Controlando o planejamento
-
+ 
 - Para **forçar** o plano: use palavras como *planeje*, *arquitetura*, *plano*.
 - Para **pular** o plano: diga *sem plano*, *direto* ou *só executa*.
 - Em projetos grandes (app, site, API, sistema...) o plano é pedido automaticamente quando o Antigravity está disponível.
+ 
+---
+ 
+## 🧪 Comandos de Teste e Depuração
+ 
+| Comando | Descrição |
+|---|---|
+| `--autoteste` | Testes automatizados completos (sem Ollama, sem microfone, sem dados/) |
+| `--teste-cerebro` | ~11 testes simulados da cadeia de cérebros (failover, limites, anti-loop, etc.) |
+| `--teste-cerebro --cerebro local --modelo <nome>` | Testa modelo local específico (ex: `llama3.1:8b`, `qwen2.5:7b`) |
+| `--teste-cerebro --cerebro nuvem` | Força teste com Gemini (requer chave configurada) |
+| `--configurar-cerebro` | Wizard interativo para chave Gemini, modelos e function calling |
+| `--modo-privado` | Força uso exclusivo do modelo local (Ollama) |
+| `--modo-nuvem` | Reabilita a cadeia Gemini → Ollama |
+| `--demo-acoes` | Simula sequência de ações rápidas na interface (requer `--interface`) |
 
 ---
 
+## 🧠 Cadeia de Cérebros (novo)
+ 
+O Nexus usa uma **cadeia de provedores** com fallback automático:
+ 
+1. **nuvem_gratis** — Gemini gratuito (function calling, rápido, limites baixos)
+2. **local** — Ollama (`llama3.1:8b`) — sempre disponível, modo privado
+ 
+**Failover automático**: 429/quota/5xx/timeout → próximo provedor. 401/403 → erro claro + fallback. Circuit breaker (3 erros → descanso 5 min → teste recuperação).
+ 
+**Contadores locais**: `dados/uso_cerebro.json` (tokens/dia/mês). Aviso aos 80%.
+ 
+**Modos**:
+- `--modo-privado` — força uso exclusivo do Ollama (nada sai da máquina)
+- `--modo-nuvem` — reabilita a cadeia Gemini → Ollama
+- `--configurar-cerebro` — wizard interativo: cria chave no Google AI Studio, lista modelos, testa function calling, salva em `config/gemini.json` (600)
+- `--teste-cerebro` — 11 testes simulados (failover 429, limite mensal, anti-loop, OpenCode max 1/turno, ação bloqueada, mascaramento chaves, histórico neutro, saude.ok)
+ 
+A pílula de status na interface mostra o cérebro ativo (**CÉREBRO: GEMINI** ou **LOCAL**). A cápsula de ação rápida mostra os passos do loop de agente em tempo real.
+ 
+---
+ 
+## 🧠 Memória Ativa (novo)
+ 
+A cada pedido, o Nexus busca os **5 fatos mais relevantes** sobre você usando embeddings locais `nomic-embed-text`:
+ 
+- Cache de vetores em `dados/memoria_vetores.json` (só a pergunta é vetorizada a cada vez)
+- Similaridade de cosseno → top 5 fatos injetados no contexto
+- Fallback palavra-chave se Ollama/embedding falhar
+- Modo privado: só busca local; nuvem: filtra fatos que parecem credenciais
+- Atualiza/remove vetores ao salvar/apagar (`lembrar_fato`, `esquecer_fato`)
+ 
+---
+ 
+## 📝 Resumo de Contexto (novo)
+ 
+O histórico não é mais descartado pelo `LIMITE_HISTORICO`. Em vez disso:
+ 
+- **Últimas 10 mensagens** mantidas integrais
+- **Resumo contínuo** do que ficou para trás em `dados/contexto_resumo.json`
+- Trigger: >30 msgs ou >6k tokens estimados
+- Falha no resumo → descarte antigo (comportamento original)
+- `limpar_resumo()` limpa o cache na nova sessão
+ 
+---
+ 
 ## ⚙️ Configuração
 
 As constantes ficam no topo do `nexus.py`:
-
+ 
 | Constante | Padrão | Descrição |
 |---|---|---|
-| `MODELO` | `llama3.1:8b` | Modelo principal (cérebro) |
+| `MODELO` | `llama3.1:8b` | Modelo local (fallback/privado) |
 | `MODELO_ESPECIALISTA` | `qwen2.5:7b` | Modelo para conhecimento e raciocínio |
 | `PASTA_TRABALHO` | `~/projetos` | Onde todos os projetos são criados |
 | `TEMPO_CODIGO` | `900` | Timeout (s) para tarefas de código |
 | `TEMPO_PLANO` | `360` | Timeout (s) para o planejamento |
 | `PERMISSOES_AUTOMATICAS` | `True` | Roda o OpenCode com `--auto` |
-| `LIMITE_HISTORICO` | `14` | Mensagens mantidas no contexto |
+| `LIMITE_HISTORICO` | `14` | Mensagens mantidas no contexto (agora com resumo) |
+| `MAX_PASSOS` | `6` | Passos máximos do loop de agente (nuvem) |
+| `MAX_PASSOS_LOCAL` | `4` | Passos máximos do loop de agente (local) |
 | `MODELO_ARQUITETO` | `gemini-3.1-pro-high` | Modelo do Antigravity para planejar |
 | `MODELO_EXECUTOR` | `gemini-3.8-flash-high` | Modelo do Antigravity para executar |
 | `ANTIGRAVITY_SANDBOX` | `False` | Roda o Antigravity em `--sandbox` (exige allow-rules; ver nota) |
 | `ANTIGRAVITY_PLANEJA` | `True` | Liga/desliga o planejamento automático |
-
+ 
 As listas `BLOQUEIOS`, `CREDENCIAIS`, `CONFIRMACOES` e `CAMINHOS_PROIBIDOS` definem a política de segurança.
-
+ 
 A lista de programas que o Nexus pode abrir/fechar fica em [`config/apps.json`](config/apps.json).
 
 A lista de sites fica em [`config/sites.json`](config/sites.json) — voce pode editar para adicionar/remover sites. Formato: `{"nome": "https://url"}`.
@@ -325,16 +388,21 @@ estiverem na varredura. Nomes cadastrados à mão não são sobrescritos: seu
 ---
 
 ## 🗂️ Estrutura
-
+ 
 ```
 Nexus/
 ├── nexus.py                  # Aplicação principal (loop, intenção, segurança, pipeline)
+├── cerebro.py                 # Cadeia de cérebros (Gemini + Ollama, failover, contadores)
+├── memoria_ativa.py           # Embeddings nomic-embed-text + busca semântica de fatos
+├── resumo_contexto.py         # Resumo contínuo do histórico antigo
 ├── comum.py                   # Helpers compartilhados (caminhos, JSON, memória no prompt)
 ├── voz.py                     # Wakeword, transcrição e fala (usado com --voz)
 ├── interface/                 # Interface gráfica (PySide6/Qt)
 │   ├── app.py                 # Inicia o Qt, a janela e a instância única
 │   ├── janela_principal.py    # Janela, orbe e barra de comando
 │   ├── ponte.py               # Sinais Qt entre o núcleo e a interface
+│   ├── acoes_rapidas.py       # Cápsula de ação rápida (passos do loop)
+│   ├── estilo.py              # Estilos visuais (orbe, cápsula, popups)
 │   └── popups/                # Popups por ferramenta (resultado real)
 ├── nexus.service             # Modelo do serviço systemd (usado pelo instalador)
 ├── instalar_servico.sh        # Instala/ativa o Nexus como serviço de usuário
@@ -346,11 +414,16 @@ Nexus/
 │   └── *.py                   # Um arquivo por ferramenta
 ├── config/
 │   ├── apps.json              # Programas que podem ser abertos/fechados
-│   └── spotify.json           # Client ID do Spotify (não versionado)
-├── dados/                     # Memória, tarefas, lembretes e índice vetorial (não versionado)
+│   ├── sites.json             # Sites conhecidos (fallback busca web)
+│   ├── voz.json               # Config de wakeword/microfone
+│   ├── cerebro.json           # Cadeia de provedores (prioridade, modelos, limites)
+│   ├── gemini.json            # Chave da API Gemini (permissão 600, não versionado)
+│   └── protegidos.json        # Arquivos bloqueados para auto-aprimoramento
+├── dados/                     # Memória, tarefas, lembretes, vetores, resumo, uso (não versionado)
 ├── requirements.txt
 ├── INSTALACAO.md
 ├── PLANO.md                   # Plano de arquitetura gerado pelo Antigravity
+├── AGENTS.md                  # Regras para agentes (OpenCode, Antigravity)
 └── README.md
 ```
 
