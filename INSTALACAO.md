@@ -166,6 +166,7 @@ Depois disso e so falar:
 - "toca alguma coisa do Charlie Brown Jr"
 - "pausa o spotify", "proxima musica", "o que esta tocando"
 - "volume do spotify 40"
+- "toca a playlist To a fim" (ele le suas playlists e escolhe a de nome mais parecido)
 
 O plugin prefere tocar **no computador**: se o Spotify não estiver aberto, ele
 sobe o aplicativo sozinho antes de dar play.

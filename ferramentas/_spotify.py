@@ -8,6 +8,7 @@ reconectar.
 so a stdlib, para nao adicionar dependencia ao projeto.
 """
 import base64
+import difflib
 import hashlib
 import json
 import os
@@ -281,9 +282,24 @@ PARADAS_FALA = PARADAS_PLAYLIST | {
     "alguma", "algum", "the", "y", "pra", "por", "com",
 }
 
+# Verbos de comando que o modelo costuma incluir junto do nome da playlist.
+# Ao contrario de PARADAS_FALA, aqui mantemos 'musica': uma playlist pode ate
+# se chamar 'Musicas'. Sem tirar o verbo, 'toque estou a fim' nao casaria com
+# 'To afim'.
+PARADAS_COLECAO = PARADAS_PLAYLIST | {
+    "toca", "tocar", "toque", "toquem", "tocando", "coloca", "coloque", "bota",
+    "bote", "manda", "poe", "poem", "abre", "abra", "abrir", "play", "start",
+    "spotify", "quero", "queria", "favor", "ai", "aqui",
+}
+
 
 def _tokens(texto):
     return [t for t in chave_nome(texto or "").split() if t not in PARADAS_PLAYLIST]
+
+
+def _fonemas_playlist(texto):
+    """Palavras uteis do pedido de playlist, sem verbos nem conectivos."""
+    return [t for t in chave_nome(texto or "").split() if t not in PARADAS_COLECAO]
 
 
 def _tokens_fala(texto):
@@ -322,25 +338,40 @@ def relevantes(termo: str, resultados):
     return [linha[3] for linha in pontuadas]
 
 
-def _casar_playlist(termo: str, nome: str) -> bool:
-    """'a playlist do afim' tem que achar a playlist 'Tô afim'.
+LIMIAR_PLAYLIST = 0.6
 
-    O reconhecimento de falafragmenta as palavras: 'MPB' chega como 'mp b' e
-    'Tô afim' perde o acento. Por isso comparamos o texto sem espacos, e nao
-    palavra por palavra: 'mpb' dentro de 'mpb', 'afim' dentro de 'to afim'.
+
+def _similaridade(consulta: str, nome: str) -> float:
+    """Quao perto o pedido falado esta do nome da playlist (0 a 1).
+
+    Comparamos o texto sem espacos, entao 'estou a fim' casa com 'To afim' e
+    'mpb' casa com 'MPB' mesmo com o reconhecimento fragmentando as palavras.
     """
-    termos = _tokens(termo)
-    if not termos:
-        return True
     alvo = chave_nome(nome or "").replace(" ", "")
-    return "".join(termos) in alvo
+    if not consulta:
+        return 0.0
+    if not alvo:
+        return 0.0
+    if consulta in alvo or alvo in consulta:
+        return 1.0
+    return difflib.SequenceMatcher(None, consulta, alvo).ratio()
+
+
+def _consulta_playlist(termo: str) -> str:
+    return "".join(_fonemas_playlist(termo))
+
+
+def _casar_playlist(termo: str, nome: str) -> bool:
+    return _similaridade(_consulta_playlist(termo), nome) >= LIMIAR_PLAYLIST
 
 
 def buscar_playlists(termo: str, limite=10):
     """Procura playlists pelo nome, com as do usuario em primeiro lugar.
 
     'minha playlist do afim', 'a playlist do afim' e 'afim' precisam achar a
-    mesma coisa, entao as playlists salvas na conta vem antes das publicas.
+    mesma coisa, entao as playlists salvas na conta vem antes das publicas. A
+    ordem final e por semelhanca com o que foi falado: pedir 'estou afim' leva
+    a 'To afim'.
     """
     termo = termo or ""
     encontradas, vistas = [], set()
@@ -351,7 +382,10 @@ def buscar_playlists(termo: str, limite=10):
         resumo = _resumo_playlist(item)
         if not resumo["id"] or resumo["id"] in vistas:
             return
-        if not resumo["uri"] or not _casar_playlist(termo, resumo["nome"]):
+        if not resumo["uri"]:
+            return
+        resumo["_pontos"] = _similaridade(_consulta_playlist(termo), resumo["nome"])
+        if resumo["_pontos"] < LIMIAR_PLAYLIST:
             return
         vistas.add(resumo["id"])
         resumo["_preferida"] = prioritise
@@ -361,7 +395,8 @@ def buscar_playlists(termo: str, limite=10):
         add(item, True)
 
     url = API + "/search?" + urllib.parse.urlencode({
-        "q": termo or "", "type": "playlist", "limit": max(1, min(limite, 20)),
+        "q": " ".join(_fonemas_playlist(termo)), "type": "playlist",
+        "limit": max(1, min(limite, 20)),
     })
     try:
         publicas = _pedido("GET", url, token=token()).get("playlists", {}).get("items", [])
@@ -371,11 +406,28 @@ def buscar_playlists(termo: str, limite=10):
     for item in publicas:
         add(item, False)
 
-    # Prioriza as da conta, e depois o nome mais parecido com o pedido.
-    encontradas.sort(key=lambda r: (not r["_preferida"], len(r["nome"])))
+    # Da conta primeiro; dentro de cada grupo, o nome mais parecido com o pedido.
+    encontradas.sort(key=lambda r: (not r["_preferida"], -r["_pontos"], len(r["nome"])))
     for resumo in encontradas:
         resumo.pop("_preferida", None)
+        resumo.pop("_pontos", None)
     return encontradas
+
+
+def playlists_para_prompt(limite=40) -> str:
+    """Lista as playlists do usuario para o modelo escolher o nome certo."""
+    try:
+        itens = minhas_playlists()
+    except Exception:  # noqa: BLE001 - sem internet/token o prompt segue sem a lista
+        return ""
+    nomes = [(_resumo_playlist(i)["nome"] or "").strip() for i in itens if i]
+    nomes = [nome for nome in nomes if nome]
+    if not nomes:
+        return ""
+    return (
+        "\n\nPlaylists do usuario no Spotify (para 'tocar a playlist', use o nome "
+        "exato como aparece aqui):\n" + ", ".join(nomes[:limite])
+    )
 
 
 def dispositivos():
