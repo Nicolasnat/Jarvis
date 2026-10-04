@@ -58,8 +58,8 @@ PROMPT_INICIAL = (
 # e fraco e o silencio sozinho ja passa de qualquer numero sensato.
 LIMITE_BARGE_IN = 0.008           # piso absoluto, mic em silencio
 FATOR_BARGE_IN = 2.5              # voz = 2,5x o chao (~8 dB acima do ruido)
-LIMITE_BARGE_IN_FALANDO = 0.030   # piso absoluto durante a fala do Nexus
-FATOR_BARGE_IN_ECHO = 8.0         # com eco da propria voz, exige muito mais
+LIMITE_BARGE_IN_FALANDO = 0.012   # piso absoluto durante a fala do Nexus
+FATOR_BARGE_IN_ECHO = 3.0         # sobe o alvo se o mic captar a propria voz
 DURACAO_BARGE_IN = 0.45           # segundos de fala continua para interromper
 CALIBRACAO_VIGIA_BLOCOS = 5       # 5 x 80 ms medindo o chao antes de armar
 
