@@ -101,7 +101,23 @@ journalctl --user -u nexus.service -f
 - Trigger: >30 msgs ou >6k tokens estimados. Falha no resumo -> descarte antigo (`podar`).
 - `limpar_resumo()` limpa cache nova sessao.
  
-## Auto-Aprimoramento Supervisionado
+## Painel de Log do Sistema (interface/painel_log.py)
+
+- **Botão LOG** na barra de título (ícone terminal + "LOG", checkable, atalho `Ctrl+L`)
+- **Sinal Qt**: `Ponte.evento_log(dict)` conectado ao `PainelLog.adicionar_evento(dict)`
+- **Painel** (`interface/painel_log.py`): desliza de baixo para cima (fade + translação ~250ms), ~80% da altura, não escurece fundo (orbe/cápsula visíveis)
+- **Cabeçalho**: "LOG DO SISTEMA // N.E.X.U.S.", contador eventos, filtros (chips: TUDO/COMANDOS/FERRAMENTAS/CÉREBRO/SEGURANÇA/ERROS), busca "Filtrar...", botões "Limpar tela" / "Exportar Telemetria" / "Fechar [ESC]"
+- **Lista** (`QListView` + `QStyledItemDelegate`): uma linha por evento `[HH:MM:SS] TAG titulo EXEC #0042 duracao`, cores por tipo (ciano/verde/âmbar/vermelho), ícones, `EXEC #0042`, duração, OK/✗
+- **Expansão**: clique na linha expande detalhes (args, resultado, saída comando) com animação
+- **Rolagem**: auto-scroll no fim; se rolar para cima → pausa + pílula "↓ NOVOS EVENTOS"
+- **Performance**: updates visuais a cada 100ms (timer), máx 500 linhas visíveis, resto no buffer; agrupa updates visuais
+- **Rodapé**: "SESSÃO CRIPTOGRAFADA: N.E.X.U.S. KERNEL", "Fechar [ESC]", "Limpar tela" (só visual), "Exportar Telemetria" (salva .md filtrado/mascarado)
+- **Botão na barra de título**: ícone terminal + "LOG" (mono pequeno), checkable, indicadores: ponto pulsante (atividade), contador novos eventos, ponto vermelho/âmbar (erro/bloqueio)
+- **Atalho**: `Ctrl+L` alterna; `ESC` fecha
+- **Callback global**: `eventos.registrar_ouvinte_global(_ponte.emitir_evento_log)` registrado no `main()` ao iniciar interface
+- **Modo demo**: `--interface --demo-log` simula sequência variada de eventos sem Ollama/microfone
+
+- **Comando de voz/texto**: "mostra o log" / "abre o log" → abre painel (ação rápida via ponte, sem popup extra); "fecha o log" → fecha
  
 - **Gatilho**: `pedir_ao_opencode` detecta auto-aprimoramento se `pasta_destino` for a raiz do Nexus (`BASE_PROJETO`) OU o pedido contiver: "seu código", "você mesmo", "no nexus", "nesse bug", "auto-aprimoramento", "melhore o nexus", "corrija você", "em si mesmo".
 - **Fluxo**: worktree isolada em `~/projetos/.nexus-dev/<id>` -> OpenCode -> `python nexus.py --autoteste` -> verifica `config/protegidos.json` -> apresenta diff -> `confirmar_risco` -> merge + `scripts/aplicar_e_vigiar.sh` -> vigia systemd (60s, checa `active` + `dados/saude.ok`) -> rollback automatico se falhar.

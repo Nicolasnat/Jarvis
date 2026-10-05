@@ -15,6 +15,11 @@ from comum import (
     PASTA_TRABALHO, PASTA_DADOS, PASTA_CONFIG, BASE_PROJETO,
     MODELO_ESPECIALISTA, resolver, esquema, TEXTO,
     limpar_ansi, resumir_busca, memoria_para_prompt, chave_nome,
+    executar_comando,
+)
+from eventos import (
+    log_estado, log_voz, log_cerebro, log_ferramenta,
+    log_comando, log_seguranca, log_erro, log_sistema,
 )
 from ferramentas.carregador import carregar_plugins
 from ferramentas import definir_volume as _volume_sistema
@@ -829,6 +834,8 @@ def _gate_seguranca(meta: dict, argumentos: dict):
 
 
 def executar(nome: str, argumentos: dict) -> str:
+    inicio = time.time()
+    exec_id = None
     if _ponte:
         _ponte_emitir("ferramenta_iniciada", nome, argumentos or {})
         # O handler em interface/app.py ja chama definir_estado("executando", acao_texto)
@@ -840,6 +847,7 @@ def executar(nome: str, argumentos: dict) -> str:
         resultado = f"Falha: a ferramenta '{nome}' nao existe."
         if _ponte:
             _ponte_emitir("ferramenta_concluida", nome, resultado)
+        log_ferramenta(nome, f"Ferramenta inexistente: {nome}", False, exec_id=0)
         return resultado
 
     try:
@@ -848,6 +856,7 @@ def executar(nome: str, argumentos: dict) -> str:
         resultado = f"Falha ao interpretar os argumentos de '{nome}': {erro}"
         if _ponte:
             _ponte_emitir("ferramenta_concluida", nome, resultado)
+        log_ferramenta(nome, f"Erro argumentos: {erro}", False, exec_id=0)
         return resultado
 
     if descartados:
@@ -861,12 +870,14 @@ def executar(nome: str, argumentos: dict) -> str:
         resultado = f"Falha: '{nome}' exige o parametro {', '.join(faltando)} e nao foi fornecido."
         if _ponte:
             _ponte_emitir("ferramenta_concluida", nome, resultado)
+        log_ferramenta(nome, f"Parametros faltando: {faltando}", False, exec_id=0)
         return resultado
 
     bloqueio = _gate_seguranca(META.get(nome), corrigidos)
     if bloqueio:
         if _ponte:
             _ponte_emitir("ferramenta_concluida", nome, bloqueio)
+        log_seguranca(f"Bloqueado: {nome}", bloqueio, False, exec_id=0)
         return bloqueio
 
     try:
@@ -878,6 +889,10 @@ def executar(nome: str, argumentos: dict) -> str:
 
     if _ponte:
         _ponte_emitir("ferramenta_concluida", nome, resultado)
+    
+    duracao_ms = int((time.time() - inicio) * 1000)
+    ok = "erro" not in resultado.lower() and "falha" not in resultado.lower() and "falhou" not in resultado.lower()
+    log_ferramenta(nome, resultado, ok, duracao_ms=int((time.time() - inicio) * 1000))
     return resultado
 
 
@@ -1211,14 +1226,19 @@ def rodar_turno(conversa, texto: str):
     cfg_ativo = obter_config_ativa()
     max_passos = cfg_ativo.max_passos if cfg_ativo and cfg_ativo.max_passos > 0 else MAX_PASSOS
 
+    # Log: inicio do turno
+    log_estado(f"Turno iniciado (max {max_passos} passos)", f"Usuario: {texto[:100]}")
+
     for passo in range(max_passos):
         if _interrompido():
             print("[nexus] Interrompido antes do proximo passo.", flush=True)
+            log_sistema("Turno interrompido pelo usuario", "Interrompido antes do proximo passo")
             break
 
         # Resumo de contexto: mantem ultimas N integro + resumo do antigo
         conversa = resumir_contexto(conversa, cerebro_chat)
         _definir_estado("pensando")
+        log_estado("pensando", f"Passo {passo+1}/{max_passos}")
         mensagem = _chamar_modelo(conversa)
         conversa.append(mensagem)
 
@@ -1245,6 +1265,7 @@ def rodar_turno(conversa, texto: str):
             nome, argumentos = _corrigir_volume(nome, argumentos, texto)
 
             print(f"\n[nexus] passo {passo+1}/{max_passos} executando {nome}({argumentos})...", flush=True)
+            log_estado(f"executando ferramenta: {nome}", f"Passo {passo+1}/{max_passos}")
 
             # Anti-duplicacao exata (mesma ferramenta + mesmos args)
             chave = _chave_chamada(nome, argumentos)
@@ -1319,6 +1340,7 @@ def rodar_turno(conversa, texto: str):
         # Se estouramos max_passos, forcar resposta final
         if passo == max_passos - 1:
             _definir_estado("pensando")
+            log_estado("Limite de passos atingido", f"Forçando resposta final após {max_passos} passos")
             mensagem_final = _chamar_modelo(conversa + [{
                 "role": "system",
                 "content": f"LIMITE DE {max_passos} PASSOS ATINGIDO. Resuma o que conseguiu, o que faltou e o que o usuario deve fazer. Nao chame mais ferramentas."
@@ -1327,6 +1349,7 @@ def rodar_turno(conversa, texto: str):
                 conversa.append(mensagem_final)
             break
 
+    log_estado("Turno finalizado", f"Total de passos: {passo+1}, Ferramentas usadas: {len(chamadas)}")
     return conversa, chamadas, resultados_turno
 
 
@@ -2516,29 +2539,25 @@ def main():
                 iniciar_interface,
             )
             from interface.ponte import Ponte
-
-            if not interface_disponivel():
-                print(
-                    "[nexus] Interface grafica indisponivel (sem display ou PySide6 ausente). Continuando no terminal.",
-                    flush=True,
-                )
-            else:
-                global _ponte
-                _ponte = Ponte()
-                _set_ponte_seguranca(_ponte)
-                # Registrar callback para mudanca de cerebro ativo
-                def _ao_cerebro_mudar(novo_provedor: str):
-                    _ponte.emitir_cerebro(novo_provedor)
-                    # Aviso por voz curto
-                    if _voz is not None and _voz.disponivel():
-                        if "gemini" in novo_provedor.lower():
-                            _voz.falar("Usando a nuvem", vigiar=False)
-                        elif "ollama" in novo_provedor.lower() or "local" in novo_provedor.lower():
-                            _voz.falar("Modo local", vigiar=False)
-                set_callback_cerebro_mudou(_ao_cerebro_mudar)
-                ctrl_interface = iniciar_interface(ponte=_ponte)
-                # Modo interface habilita voz + texto + janela
-                modo_voz = True
+            global _ponte
+            _ponte = Ponte()
+            _set_ponte_seguranca(_ponte)
+            # Registrar callback para mudanca de cerebro ativo
+            def _ao_cerebro_mudar(novo_provedor: str):
+                _ponte.emitir_cerebro(novo_provedor)
+                # Aviso por voz curto
+                if _voz is not None and _voz.disponivel():
+                    if "gemini" in novo_provedor.lower():
+                        _voz.falar("Usando a nuvem", vigiar=False)
+                    elif "ollama" in novo_provedor.lower() or "local" in novo_provedor.lower():
+                        _voz.falar("Modo local", vigiar=False)
+            set_callback_cerebro_mudou(_ao_cerebro_mudar)
+            # Conectar sinal de log para o painel
+            from eventos import registrar_ouvinte_global
+            registrar_ouvinte_global(_ponte.emitir_evento_log)
+            ctrl_interface = iniciar_interface(ponte=_ponte)
+            # Modo interface habilita voz + texto + janela
+            modo_voz = True
         except JaEmExecucao:
             print(
                 "[nexus] Ja existe uma instancia com interface em execucao. Encerrando.",
