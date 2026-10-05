@@ -23,6 +23,7 @@ from interface.estilo import (
     COR_CIANO,
     COR_CIANO_BRILHO,
     COR_CIANO_ESCURO,
+    COR_CIANO_TRANSPARENTE,
     COR_BORDA,
     COR_TEXTO,
     COR_TEXTO_MUTED,
@@ -112,7 +113,7 @@ class JanelaPrincipal(QWidget):
         self._construir_ui()
 
     def _construir_ui(self) -> None:
-        """Monta o leiaute completo da janela principal."""
+        """Monta o layout completo da janela principal."""
         layout_raiz = QVBoxLayout(self)
         layout_raiz.setContentsMargins(12, 12, 12, 12)
 
@@ -150,6 +151,34 @@ class JanelaPrincipal(QWidget):
         layout_topo.addWidget(rotulo_topo)
 
         layout_topo.addStretch(1)
+
+        # Botao LOG (painel de log do sistema)
+        self.btn_log = QPushButton("LOG")
+        self.btn_log.setFixedSize(56, 22)
+        self.btn_log.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_log.setToolTip("Abrir painel de log do sistema [Ctrl+L]")
+        self.btn_log.setStyleSheet(f"""
+            QPushButton {{
+                background-color: transparent;
+                border: 1px solid {COR_BORDA};
+                border-radius: 11px;
+                color: {COR_TEXTO_MUTED};
+                font-family: {FONTE_MONO};
+                font-size: 8px;
+                font-weight: bold;
+                padding: 0px 6px;
+            }}
+            QPushButton:hover {{
+                color: {COR_CIANO};
+                border: 1px solid {COR_CIANO};
+            }}
+            QPushButton:pressed {{
+                background-color: {COR_CIANO_TRANSPARENTE};
+            }}
+        """)
+        self.btn_log.setCheckable(True)
+        self.btn_log.toggled.connect(self._alternar_painel_log)
+        layout_topo.addWidget(self.btn_log)
 
         # Botao minimizar
         btn_minimizar = QPushButton("—")
@@ -355,6 +384,23 @@ class JanelaPrincipal(QWidget):
         from interface.estilo import COR_SUCESSO, FONTE_MONO
         self.pilula.item3.setStyleSheet(f"color: {COR_SUCESSO}; font-family: {FONTE_MONO}; font-size: 10px; font-weight: bold;")
 
+    def _alternar_painel_log(self, aberto: bool) -> None:
+        """Alterna a visibilidade do painel de log."""
+        if not hasattr(self, "_painel_log"):
+            self._criar_painel_log()
+        if aberto:
+            self._painel_log.mostrar()
+        else:
+            self._painel_log.esconder()
+
+    def _criar_painel_log(self):
+        """Cria o painel de log do sistema (lazy loading)."""
+        from interface.painel_log import PainelLog
+        self._painel_log = PainelLog(self)
+        # Conectar sinal de log da ponte
+        if hasattr(self, "_ponte") and self._ponte:
+            self._ponte.evento_log.connect(self._painel_log.adicionar_evento)
+
     def mostrar_ou_trazer(self) -> None:
         """Exibe a janela ou traz para a frente se estiver minimizada/oculta."""
         if not self.isVisible():
@@ -368,6 +414,10 @@ class JanelaPrincipal(QWidget):
         """Oculta a janela ao teclar ESC."""
         if event.key() == Qt.Key.Key_Escape:
             self.hide()
+            event.accept()
+        elif event.key() == Qt.Key.Key_L and event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+            # Ctrl+L alterna painel de log
+            self.btn_log.setChecked(not self.btn_log.isChecked())
             event.accept()
         else:
             super().keyPressEvent(event)

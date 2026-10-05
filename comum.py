@@ -1,12 +1,13 @@
 """Funcoes e constantes compartilhadas entre o Nexus e os plugins.
-
 Fica num modulo separado para que os plugins possam importar helpers sem
 criar import circular com o nexus.py (que roda como __main__).
 """
 import json
 import re
+import time
 import unicodedata
 from pathlib import Path
+from typing import Optional
 
 BASE_PROJETO = Path(__file__).resolve().parent
 PASTA_TRABALHO = Path.home() / "projetos"
@@ -131,3 +132,60 @@ def memoria_para_prompt(limite=8, busca: str = "", modo_privado: bool = False, c
     from ferramentas.memoria_ativa import obter_fatos_relevantes, formatar_bloco_memoria
     fatos = obter_fatos_relevantes(busca, modo_privado=modo_privado, cerebro_nuvem=cerebro_nuvem)
     return formatar_bloco_memoria(fatos)
+
+
+# Controle de log de comandos (pode ser desativado se necessario)
+LOG_REGISTRAR_FALA = True
+LOG_REGISTRAR_COMANDOS = True
+
+
+def executar_comando(
+    comando: list,
+    tempo: int = 120,
+    pasta: Optional[str] = None,
+    mostrar: bool = True,
+    stdin_nulo: bool = True,
+    env_extra: Optional[dict] = None,
+    registrar: bool = True,
+) -> str:
+    """Wrapper para executar comandos do sistema com registro de log.
+    
+    Este wrapper deve ser usado em vez de chamar subprocess diretamente
+    quando se quer que o comando apareca no painel de log.
+    
+    Args:
+        comando: Lista com o comando e argumentos (ex.: ['xdg-open', '/home/user'])
+        tempo: Timeout em segundos
+        pasta: Diretorio de trabalho
+        mostrar: Se True, imprime a saida no console
+        stdin_nulo: Se True, ignora stdin
+        env_extra: Variaveis de ambiente extras
+        registrar: Se True, registra o comando no log de eventos
+    
+    Returns:
+        Saida do comando como string
+    """
+    # Importa aqui para evitar import circular
+    from nexus import rodar as _rodar
+    from eventos import log_comando
+    
+    comando_str = " ".join(str(c) for c in comando)
+    inicio = time.time()
+    
+    if registrar and LOG_REGISTRAR_COMANDOS:
+        log_comando(f"$ {comando_str}", f"Executando em {pasta or '.'}", exec_id=None)
+    
+    try:
+        resultado = _rodar(comando, tempo=tempo, pasta=pasta, mostrar=mostrar, stdin_nulo=stdin_nulo, env_extra=env_extra)
+        duracao_ms = int((time.time() - inicio) * 1000)
+        
+        if registrar and LOG_REGISTRAR_COMANDOS:
+            ok = "erro" not in resultado.lower() and "falha" not in resultado.lower() and "falhou" not in resultado.lower()
+            log_comando(f"$ {comando_str}", resultado, ok, duracao_ms)
+        
+        return resultado
+    except Exception as e:
+        duracao_ms = int((time.time() - inicio) * 1000)
+        if registrar and LOG_REGISTRAR_COMANDOS:
+            log_comando(f"$ {comando_str}", f"Excecao: {e}", False, duracao_ms)
+        raise
