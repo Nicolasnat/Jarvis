@@ -61,10 +61,13 @@ FATOR_BARGE_IN = 2.5              # voz = 2,5x o chao (~8 dB acima do ruido)
 LIMITE_BARGE_IN_FALANDO = 0.012   # piso absoluto durante a fala do Nexus
 FATOR_BARGE_IN_ECHO = 3.0         # sobe o alvo se o mic captar a propria voz
 DURACAO_BARGE_IN = 0.45           # segundos de fala continua para interromper
-CALIBRACAO_VIGIA_BLOCOS = 5       # 5 x 80 ms medindo o chao antes de armar
+CALIBRACAO_VIGIA_BLOCOS = 12      # 12 x 80 ms medindo o chao antes de armar
 
 # Para de gravar 1.5s depois de voce parar de falar, em vez de esperar os 6s.
 ESPERA_SILENCIO = 1.5
+# Limiar de deteccao de fala para gravar_ate_silencio (multiplicador do RMS_MINIMO).
+# Menor = mais sensivel (capta fala mais baixa). Padrao 3.
+VAD_LIMIAR_MULT = 3
 IDIOMA_ESPEAK = "pt-br"
 IDIOMA_SPD = "pt-BR"
 VOZ_SPD = "Portuguese (Brazil)"
@@ -91,6 +94,7 @@ VOZES_PADRAO = {
     "barge_limiar_falando": LIMITE_BARGE_IN_FALANDO,
     "barge_fator_falando": FATOR_BARGE_IN_ECHO,
     "barge_duracao": DURACAO_BARGE_IN,
+    "vad_limiar_mult": VAD_LIMIAR_MULT,
 }
 
 
@@ -140,6 +144,7 @@ LIMITE_BARGE_IN_FALANDO = _numero(CONFIG_VOZ, "barge_limiar_falando", LIMITE_BAR
 FATOR_BARGE_IN_ECHO = _numero(CONFIG_VOZ, "barge_fator_falando", FATOR_BARGE_IN_ECHO)
 DURACAO_BARGE_IN = _numero(CONFIG_VOZ, "barge_duracao", DURACAO_BARGE_IN)
 ESPERA_SILENCIO = _numero(CONFIG_VOZ, "espera_silencio", ESPERA_SILENCIO)
+VAD_LIMIAR_MULT = _numero(CONFIG_VOZ, "vad_limiar_mult", VAD_LIMIAR_MULT)
 
 _modelo_vosk = None
 _modelo_fala = None
@@ -803,7 +808,7 @@ def _rms(bloco: bytes) -> float:
 
 
 def gravar_ate_silencio(destino: Path, segundos=DURACAO_FALA, espera_silencio=ESPERA_SILENCIO,
-                         atencao_inicial=0.0, limiar=RMS_MINIMO * 6, inicio=None):
+                         atencao_inicial=0.0, limiar=None, inicio=None):
     """Grava e PARA SOZINHO quando o usuario termina de falar.
 
     Antes isso gravava os 6 segundos inteiros, faltando 1s e ainda esperando 5s
@@ -822,6 +827,8 @@ def gravar_ate_silencio(destino: Path, segundos=DURACAO_FALA, espera_silencio=ES
     trata do 'para' dito no meio e o nexus.py, que le a transcricao e
     descarta o turno.
     """
+    if limiar is None:
+        limiar = RMS_MINIMO * VAD_LIMIAR_MULT
     proc = _abrir_microfone()
     amostras = bytearray()
     bytesegs = TAXA * 2
@@ -888,10 +895,12 @@ def transcrever(segundos=DURACAO_FALA, espera_silencio=ESPERA_SILENCIO, atencao_
         # beam_size=5 (o padrao) mediu o mesmo tempo do greedy, entao nao vale
         # trocar por velocidade. condition_on_previous_text=False evita a
         # repeticao inventada que aparecia quando o audio era silencio.
+        # vad_filter=False: o VAD do Whisper pode filtrar fala baixa; o nosso
+        # proprio detector de silencio (gravar_ate_silencio) ja faz esse trabalho.
         segmentos, _ = modelo.transcribe(
             str(destino), language="pt", beam_size=5,
             initial_prompt=PROMPT_INICIAL,
-            condition_on_previous_text=False, vad_filter=True,
+            condition_on_previous_text=False, vad_filter=False,
         )
         texto = " ".join(seg.text.strip() for seg in segmentos).strip()
         _ultimo_uso_fala = time.time()
@@ -916,10 +925,12 @@ def transcrever_arquivo(destino: Path) -> str:
         # beam_size=5 (o padrao) mediu o mesmo tempo do greedy, entao nao vale
         # trocar por velocidade. condition_on_previous_text=False evita a
         # repeticao inventada que aparecia quando o audio era silencio.
+        # vad_filter=False: o VAD do Whisper pode filtrar fala baixa; o nosso
+        # proprio detector de silencio (gravar_ate_silencio) ja faz esse trabalho.
         segmentos, _ = modelo.transcribe(
             str(destino), language="pt", beam_size=5,
             initial_prompt=PROMPT_INICIAL,
-            condition_on_previous_text=False, vad_filter=True,
+            condition_on_previous_text=False, vad_filter=False,
         )
         texto = " ".join(seg.text.strip() for seg in segmentos).strip()
         _ultimo_uso_fala = time.time()
@@ -935,7 +946,7 @@ def transcrever_arquivo(destino: Path) -> str:
             pass
 
 
-def comecar_a_gravar(segundos=DURACAO_FALA, espera_silencio=ESPERA_SILENCIO, atencao_inicial=0.0,
+def comecar_a_gravar(segundos=DURACAO_FALA, espera_silencio=None, atencao_inicial=0.0,
                      inicio=None):
     """Comeca a gravar em segundo plano, para o Nexus falar enquanto ouve.
 
@@ -943,6 +954,8 @@ def comecar_a_gravar(segundos=DURACAO_FALA, espera_silencio=ESPERA_SILENCIO, ate
     responder na mesma frase e nada do que ele diz se perde. 'inicio' (Event)
     marca o instante em que o aviso terminou: antes disso o audio e descartado.
     """
+    if espera_silencio is None:
+        espera_silencio = ESPERA_SILENCIO
     pasta = tempfile.mkdtemp()
     arquivo = Path(pasta) / "nexus_voz.wav"
 

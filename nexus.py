@@ -68,6 +68,10 @@ SETTINGS_ANTIGRAVITY = Path.home() / ".gemini" / "antigravity-cli" / "settings.j
 CONFIG_PERMISSOES = Path(__file__).resolve().parent / "opencode-permissoes.json"
 ULTIMO_PEDIDO = ""
 
+# Controle de interrupcao por musica
+MUSICA_INICIADA_NO_TURNO = False
+APPS_COM_SOM = ("spotify", "vlc", "youtube", "music")
+
 # O modulo voz so e carregado no modo voz. Fora dele '_interrompido()' e sempre
 # False e o Nexus continua se comportando como antes (Ctrl+C no terminal).
 _voz = None
@@ -709,12 +713,13 @@ SUA DIVISAO DE TRABALHO (obrigatoria):
 2. PARA PROJETOS GRANDES o Antigravity (Gemini) e o ARQUITETO: o sistema pede o plano a ele automaticamente antes de o OpenCode executar. Voce tambem pode chamar 'planejar_com_antigravity' quando o usuario pedir um plano/arquitetura. Use 'pedir_ao_antigravity' apenas quando o usuario citar o Antigravity ou o Gemini.
 3. SO use 'criar_pasta' para diretorios vazios de organizacao, nunca para projetos.
 4. Use 'abrir_vscode' e 'abrir_pasta' para abrir janelas.
-5. Use 'pesquisar_na_web' para fatos atuais, noticias e documentacao. Para perguntas de conhecimento geral (biografia, historia, ciencia, matematica, programacao) prefira 'perguntar_qwen'.
-6. MEMORIA: quando o usuario pedir para voce lembrar de algo (preferencias, dados pessoais, senhas nao), chame 'lembrar_fato'. Se a resposta estiver na secao de memoria do sistema, use-a. Use 'buscar_memoria'/'esquecer_fato' quando fizer sentido.
-7. RECADOS E TAREFAS: para "me lembra daqui a X" use 'agendar_lembrete'; para listas de afazeres use 'adicionar_tarefa'/'listar_tarefas'/'concluir_tarefa'; para anotar algo solto use 'anotar'.
-8. SISTEMA: use 'status_sistema' para CPU/RAM/disco; 'abrir_programa' e 'fechar_programa' para apps (o nome aproximado basta, ex. 'code', 'spotify'); 'definir_volume', 'definir_brilho', 'ler_clipboard' e 'copiar_clipboard' para o restante.
-9. SPOTIFY: tocar musica/playlist e os controles de reproducao (pausar, retomar, proxima, anterior, 'o que esta tocando') sao SEMPRE a ferramenta 'spotify'. Volume: 'volume do Spotify' usa 'spotify' (acao volume); 'aumenta/abaixa o volume' sem citar o Spotify e o volume do sistema ('definir_volume'). Nunca use 'abrir_programa' para controlar o Spotify.
-10. DOCUMENTOS: use 'indexar_documentos' para carregar arquivos/pastas (txt, md, pdf, docx) e 'perguntar_documentos' para responder perguntas com base nesse conteudo. Se a pergunta for sobre um documento que o usuario citou, indexe antes de perguntar.
+5. Conversa casual (saudacoes, 'tudo bem?', 'voce esta bem?', agradecimentos, 'super', 'valeu') se responde direto em 1 frase, sem ferramenta.
+6. Use 'pesquisar_na_web' para fatos atuais, noticias e documentacao. Para perguntas de conhecimento geral (biografia, historia, ciencia, matematica, programacao) prefira 'perguntar_qwen'.
+7. MEMORIA: quando o usuario pedir para voce lembrar de algo (preferencias, dados pessoais, senhas nao), chame 'lembrar_fato'. Se a resposta estiver na secao de memoria do sistema, use-a. Use 'buscar_memoria'/'esquecer_fato' quando fizer sentido.
+8. RECADOS E TAREFAS: para "me lembra daqui a X" use 'agendar_lembrete'; para listas de afazeres use 'adicionar_tarefa'/'listar_tarefas'/'concluir_tarefa'; para anotar algo solto use 'anotar'.
+9. SISTEMA: use 'status_sistema' para CPU/RAM/disco; 'abrir_programa' e 'fechar_programa' para apps (o nome aproximado basta, ex. 'code', 'spotify'); 'definir_volume', 'definir_brilho', 'ler_clipboard' e 'copiar_clipboard' para o restante.
+10. SPOTIFY: tocar musica/playlist e os controles de reproducao (pausar, retomar, proxima, anterior, 'o que esta tocando') sao SEMPRE a ferramenta 'spotify'. Volume: 'volume do Spotify' usa 'spotify' (acao volume); 'aumenta/abaixa o volume' sem citar o Spotify e o volume do sistema ('definir_volume'). Nunca use 'abrir_programa' para controlar o Spotify.
+11. DOCUMENTOS: use 'indexar_documentos' para carregar arquivos/pastas (txt, md, pdf, docx) e 'perguntar_documentos' para responder perguntas com base nesse conteudo. Se a pergunta for sobre um documento que o usuario citou, indexe antes de perguntar.
 
 ANTI-ALUCINACAO (obrigatoria):
 - Nunca afirme que fez algo sem antes ter chamado a ferramenta correspondente.
@@ -1198,8 +1203,76 @@ def _registrar_falha(nome: str, args: dict, historico_falhas: dict):
     historico_falhas[chave] = historico_falhas.get(chave, 0) + 1
 
 
+def _normalizar_texto_simples(texto: str) -> str:
+    """Normaliza texto para matching: minusculas, sem acentos, sem pontuacao final."""
+    import unicodedata
+    t = texto.strip().lower()
+    t = unicodedata.normalize("NFD", t)
+    t = "".join(c for c in t if unicodedata.category(c) != "Mn")
+    t = re.sub(r"[.!?]+$", "", t).strip()
+    return t
+
+
+def atalho_sem_modelo(texto: str):
+    """
+    Reconhece comandos simples de voz e devolve (nome_ferramenta, argumentos)
+    ou None se nao casar. Nao usa o modelo.
+    """
+    t = _normalizar_texto_simples(texto)
+
+    # Spotify: pausa/pausar/pause
+    if re.fullmatch(r"(pausa|pausar|pause)", t):
+        return ("spotify", {"acao": "pausar"})
+
+    # Spotify: continua/retoma/retomar/play
+    if re.fullmatch(r"(continua|retoma|retomar|play)", t):
+        return ("spotify", {"acao": "retomar"})
+
+    # Spotify: proxima/proximo/pula
+    if re.fullmatch(r"(proxima|proximo|pula)", t):
+        return ("spotify", {"acao": "proxima"})
+
+    # Spotify: anterior/volta
+    if re.fullmatch(r"(anterior|volta)", t):
+        return ("spotify", {"acao": "anterior"})
+
+    # Abrir programa: abre/abra/abrir <app> - so 1 ou 2 palavras apos o verbo
+    m = re.match(r"^(abre|abra|abrir)\s+(.+)$", t)
+    if m:
+        resto = m.group(2).strip()
+        # Remove artigos comuns no inicio
+        resto = re.sub(r"^(o|a|os|as|um|uma|o\s+|a\s+|os\s+|as\s+|um\s+|uma\s+)", "", resto).strip()
+        palavras = resto.split()
+        # So 1 ou 2 palavras (nome do app). Se tiver mais, nao usa atalho.
+        if 1 <= len(palavras) <= 2:
+            # Verifica se nao tem conectivos que indicam comando composto
+            if not any(p in palavras for p in ("e", "toca", "coloca", "toque", "coloque")):
+                return ("abrir_programa", {"app": " ".join(palavras)})
+
+    return None
+
+
+def _eh_conversa_casual(texto: str) -> bool:
+    """Detecta se o texto e uma conversa casual curta (saudacao, agradecimento, etc)."""
+    t = _normalizar_texto_simples(texto)
+    # Frases curtas tipicas de conversa casual
+    padroes = [
+        r"^(oi|ola|e ai|eae|tudo bem|tudo bom|como vai|como esta|voce esta bem|oi nexus|hey nexus)$",
+        r"^(obrigado|obrigada|valeu|gratidao|vlw)$",
+        r"^(super|legal|show|top|excelente|otimo|bom)$",
+        r"^(tchau|ate mais|falou|flw|bye)$",
+    ]
+    for p in padroes:
+        if re.fullmatch(p, t):
+            return True
+    return False
+
+
 def rodar_turno(conversa, texto: str):
-    """Loop de agente: pensa -> chama ferramentas -> recebe resultados -> decide de novo -> resposta final."""
+    """Loop de agente: pensa -> chama ferramentas -> recebe resultados -> decide de novo -> resposta final.
+    O cerebro SEMPRE roda (sem atalhos) para raciocinar, corrigir erros e decidir ferramentas.
+    """
+
     import json
     chamadas = set()
     resultados_turno = []
@@ -1219,6 +1292,7 @@ def rodar_turno(conversa, texto: str):
         # Resumo de contexto: mantem ultimas N integro + resumo do antigo
         conversa = resumir_contexto(conversa, cerebro_chat)
         _definir_estado("pensando")
+
         mensagem = _chamar_modelo(conversa)
         conversa.append(mensagem)
 
@@ -1289,6 +1363,23 @@ def rodar_turno(conversa, texto: str):
                             del historico_falhas[chave_falha]
 
                     feitas[chave] = resultado_padrao
+
+            # Se musica comecou a tocar, fecha a vigia de interrupcao para nao
+            # confundir o som do Spotify/YouTube/etc com a voz do usuario.
+            if resultado_padrao["ok"]:
+                global MUSICA_INICIADA_NO_TURNO
+                musica_comecou = False
+                if nome == "spotify":
+                    acao = argumentos.get("acao", "").lower()
+                    if acao in ("tocar", "retomar", "proxima", "anterior", "volume"):
+                        musica_comecou = True
+                elif nome == "abrir_programa":
+                    app = str(argumentos.get("app", "")).lower()
+                    if any(a in app for a in APPS_COM_SOM):
+                        musica_comecou = True
+                if musica_comecou:
+                    _fechar_vigia()
+                    MUSICA_INICIADA_NO_TURNO = True
 
             # Formatar para o modelo (tool message)
             resultado_para_modelo = _formatar_resultado_para_modelo(nome, resultado_padrao)
@@ -1512,7 +1603,7 @@ def rodar_modo_voz(conversa, servico=False):
     import time
     import voz
 
-    global _voz
+    global _voz, MUSICA_INICIADA_NO_TURNO
     _voz = voz
 
     if not voz.disponivel():
@@ -1605,6 +1696,7 @@ def rodar_modo_voz(conversa, servico=False):
         conversa.append({"role": "user", "content": texto})
         global ULTIMO_PEDIDO
         ULTIMO_PEDIDO = texto
+        MUSICA_INICIADA_NO_TURNO = False
 
         # Daqui ate a fala o microfone fica aberto: e essa a janela em que voce
         # pode dizer 'para' e cancelar o que o Nexus estiver fazendo.
@@ -1639,7 +1731,11 @@ def rodar_modo_voz(conversa, servico=False):
         # instante em que voce falar por cima.
         _definir_estado("falando")
         _ponte_emitir("resposta_final", resposta)
-        voz.falar(resposta)
+        if MUSICA_INICIADA_NO_TURNO:
+            voz.falar(resposta, vigiar=False)
+            MUSICA_INICIADA_NO_TURNO = False
+        else:
+            voz.falar(resposta)
         if voz.interrompido():
             print("[voz] Fala interrompida.", flush=True)
         voz.descarregar()

@@ -98,14 +98,24 @@ def resumir_contexto(conversa: list[dict], cerebro_chat_fn) -> list[dict]:
     Falha -> retorna conversa podada pelo metodo antigo.
     """
     try:
-        # Verifica se precisa resumir
         if not _precisa_resumir(conversa):
             return conversa
 
-        # Carrega resumo atual
         resumo_atual = _carregar_resumo()
 
-        # Pede resumo ao cerebro ativo
+        if resumo_atual and resumo_atual.strip():
+            system_msg = conversa[0] if conversa and conversa[0].get("role") == "system" else {"role": "system", "content": ""}
+            msgs_sem_sistema = [m for m in conversa if m.get("role") != "system"]
+            ultimas = msgs_sem_sistema[-LIMITE_MENSAGENS_INTEGRAS:]
+
+            nova_conversa = [system_msg]
+            nova_conversa.append({
+                "role": "system",
+                "content": f"Resumo do historico anterior:\n{resumo_atual.strip()}"
+            })
+            nova_conversa.extend(ultimas)
+            return nova_conversa
+
         prompt = _construir_prompt_resumo(conversa, resumo_atual)
         if not prompt:
             return conversa
@@ -122,7 +132,6 @@ def resumir_contexto(conversa: list[dict], cerebro_chat_fn) -> list[dict]:
         novo_resumo = resultado.conteudo.strip()
         _salvar_resumo(novo_resumo)
 
-        # Reconstroi conversa: system + resumo + ultimas N mensagens integrais
         system_msg = conversa[0] if conversa and conversa[0].get("role") == "system" else {"role": "system", "content": ""}
         msgs_sem_sistema = [m for m in conversa if m.get("role") != "system"]
         ultimas = msgs_sem_sistema[-LIMITE_MENSAGENS_INTEGRAS:]
@@ -137,7 +146,6 @@ def resumir_contexto(conversa: list[dict], cerebro_chat_fn) -> list[dict]:
         return nova_conversa
 
     except Exception:
-        # Falha silenciosa -> descarte antigo (podar)
         return podar_antigo(conversa)
 
 

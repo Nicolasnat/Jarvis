@@ -57,15 +57,15 @@ def _buscar_por_nome_parcial(pasta: Path) -> Path | None:
 
 
 def funcao(caminho: str = "."):
+    # Se caminho for apenas um numero ou nao existir como pasta, ignora e abre sem caminho
+    if caminho and caminho.strip().isdigit():
+        caminho = "."
     pasta = resolver(caminho)
+    if not pasta.exists() or not pasta.is_dir():
+        caminho = "."
+        pasta = resolver(caminho)
     if not pasta.exists():
-        existente = _tentar_variacoes(pasta)
-        if existente is None:
-            existente = _buscar_por_nome_parcial(pasta)
-        if existente is not None:
-            pasta = existente
-        else:
-            pasta.mkdir(parents=True, exist_ok=True)
+        pasta.mkdir(parents=True, exist_ok=True)
     try:
         subprocess.Popen(
             ["code", str(pasta)],

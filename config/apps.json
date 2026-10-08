@@ -239,6 +239,9 @@
   "nvidia x server settings": [
     "/usr/bin/nvidia-settings"
   ],
+  "obsidian": [
+    "/snap/bin/obsidian"
+  ],
   "onlyoffice": [
     "/snap/bin/onlyoffice-desktopeditors"
   ],
@@ -291,7 +294,8 @@
     "software-properties-gtk"
   ],
   "spotify": [
-    "/snap/bin/spotify"
+    "/snap/bin/spotify",
+    "--disable-gpu"
   ],
   "startup applications": [
     "gnome-session-properties"

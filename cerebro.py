@@ -14,8 +14,10 @@ from datetime import datetime
 from enum import Enum
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from comum import PASTA_DADOS, ler_json, salvar_json
+from eventos import registrar_evento
 
 
 # Configuraveis globais do loop de agente
@@ -29,6 +31,7 @@ class TipoProvedor(Enum):
     NUVEM_PAGO = "nuvem_pago"
     NUVEM_GRATIS = "nuvem_gratis"
     LOCAL = "local"
+    OPENAI = "openai"
 
 
 class EstadoProvedor(Enum):
@@ -62,6 +65,7 @@ class EstadoProvedorData:
     erros_consecutivos: int = 0
     ultimo_erro: str = ""
     entrou_descanso_em: float = 0
+    descanso_ate: float = 0
     chamada_teste_ok: bool = False
 
 
@@ -243,10 +247,16 @@ class CerebroGemini(CerebroBase):
         tools = self._converter_ferramentas(ferramentas)
 
         try:
-            config = self._types.GenerateContentConfig(
-                tools=[self._types.Tool(function_declarations=tools)] if tools else None,
-                temperature=0.7,
-            )
+            # Tenta desativar o AFC (Automatic Function Calling) para evitar aviso "AFC is not recommended"
+            config_kwargs = {
+                "tools": [self._types.Tool(function_declarations=tools)] if tools else None,
+                "temperature": 0.7,
+            }
+            try:
+                config_kwargs["automatic_function_calling"] = self._types.AutomaticFunctionCallingConfig(disable=True)
+            except (AttributeError, TypeError):
+                pass  # SDK nao suporta, ignora silenciosamente
+            config = self._types.GenerateContentConfig(**config_kwargs)
             r = self._client.models.generate_content(
                 model=self._config.modelo,
                 contents=msgs,
@@ -325,6 +335,168 @@ class CerebroGemini(CerebroBase):
             return False
 
 
+class CerebroOpenAI(CerebroBase):
+    def __init__(self, config: ConfigProvedor):
+        self._config = config
+        self._client = None
+
+    def _obter_chave(self) -> str:
+        if self._config.chave_ref:
+            chave = os.environ.get(self._config.chave_ref)
+            if chave:
+                return chave
+            from comum import BASE_PROJETO, ler_json
+            arquivo_chaves = BASE_PROJETO / "config" / "openai.json"
+            chaves = ler_json(arquivo_chaves, {})
+            if self._config.chave_ref in chaves:
+                return chaves[self._config.chave_ref]
+        return ""
+
+    def _ensure_client(self):
+        if self._client is not None:
+            return True
+        chave = self._obter_chave()
+        if not chave:
+            return False
+        from openai import OpenAI
+        self._client = OpenAI(api_key=chave)
+        return True
+
+    @property
+    def config(self) -> ConfigProvedor:
+        return self._config
+
+    def _converter_mensagens(self, mensagens: list[MensagemNeutra]) -> list:
+        resultado = []
+        for m in mensagens:
+            if m.role == "system":
+                resultado.append({"role": "system", "content": m.content})
+            elif m.role == "user":
+                resultado.append({"role": "user", "content": m.content})
+            elif m.role == "assistant":
+                if m.tool_calls:
+                    for tc in m.tool_calls:
+                        resultado.append({
+                            "role": "assistant",
+                            "tool_calls": [{
+                                "id": tc["function"].get("id", "call_" + str(hash(str(tc))))[:24],
+                                "type": "function",
+                                "function": {
+                                    "name": tc["function"]["name"],
+                                    "arguments": json.dumps(tc["function"].get("arguments", {})),
+                                }
+                            }]
+                        })
+                elif m.content:
+                    resultado.append({"role": "assistant", "content": m.content})
+            elif m.role == "tool":
+                if m.tool_call_id and m.name:
+                    resultado.append({
+                        "role": "tool",
+                        "tool_call_id": m.tool_call_id,
+                        "name": m.name,
+                        "content": m.content,
+                    })
+        return resultado
+
+    def _converter_ferramentas(self, ferramentas: list[dict] | None) -> list | None:
+        if not ferramentas:
+            return None
+        resultado = []
+        for f in ferramentas:
+            if f.get("type") == "function":
+                fn = f["function"]
+                resultado.append({
+                    "type": "function",
+                    "function": {
+                        "name": fn["name"],
+                        "description": fn.get("description", ""),
+                        "parameters": fn.get("parameters", {}),
+                    }
+                })
+        return resultado if resultado else None
+
+    def chat(self, mensagens: list[MensagemNeutra], ferramentas: list[dict] | None = None) -> ResultadoChat:
+        if not self._ensure_client():
+            return ResultadoChat(conteudo="", erro="Chave da API OpenAI nao configurada", provedor_usado=self._config.nome)
+
+        msgs = self._converter_mensagens(mensagens)
+        tools = self._converter_ferramentas(ferramentas)
+
+        try:
+            kwargs = {
+                "model": self._config.modelo,
+                "messages": msgs,
+                "temperature": 0.7,
+            }
+            if tools:
+                kwargs["tools"] = tools
+                kwargs["tool_choice"] = "auto"
+
+            r = self._client.chat.completions.create(**kwargs)
+
+            choice = r.choices[0]
+            message = choice.message
+
+            conteudo = message.content or ""
+            tool_calls = []
+            if message.tool_calls:
+                for tc in message.tool_calls:
+                    tool_calls.append({
+                        "function": {
+                            "name": tc.function.name,
+                            "arguments": json.loads(tc.function.arguments or "{}"),
+                        }
+                    })
+
+            tokens_entrada = r.usage.prompt_tokens if r.usage else 0
+            tokens_saida = r.usage.completion_tokens if r.usage else 0
+
+            return ResultadoChat(
+                conteudo=conteudo,
+                tool_calls=tool_calls,
+                tokens_entrada=tokens_entrada,
+                tokens_saida=tokens_saida,
+                modelo_usado=self._config.modelo,
+                provedor_usado=self._config.nome,
+            )
+        except Exception as e:
+            return ResultadoChat(conteudo="", erro=str(e), provedor_usado=self._config.nome)
+
+    def listar_modelos(self) -> list[str]:
+        if not self._ensure_client():
+            return []
+        try:
+            modelos = []
+            for m in self._client.models.list():
+                modelos.append(m.id)
+            return modelos
+        except Exception:
+            return []
+
+    def testar_function_calling(self) -> bool:
+        if not self._ensure_client():
+            return False
+        try:
+            tools = [{
+                "type": "function",
+                "function": {
+                    "name": "teste",
+                    "description": "teste",
+                    "parameters": {"type": "object", "properties": {}},
+                }
+            }]
+            r = self._client.chat.completions.create(
+                model=self._config.modelo,
+                messages=[{"role": "user", "content": "Teste function calling"}],
+                tools=tools,
+                tool_choice="auto",
+            )
+            return bool(r.choices[0].message.tool_calls)
+        except Exception:
+            return False
+
+
 class GerenciadorCerebros:
     ARQUIVO_CEREBRO = PASTA_DADOS / "cerebro.json"
     ARQUIVO_USO = PASTA_DADOS / "uso_cerebro.json"
@@ -395,6 +567,7 @@ class GerenciadorCerebros:
                 erros_consecutivos=ed.get("erros_consecutivos", 0),
                 ultimo_erro=ed.get("ultimo_erro", ""),
                 entrou_descanso_em=ed.get("entrou_descanso_em", 0),
+                descanso_ate=ed.get("descanso_ate", 0),
                 chamada_teste_ok=ed.get("chamada_teste_ok", False),
             )
         if not self.ARQUIVO_USO.exists():
@@ -412,6 +585,7 @@ class GerenciadorCerebros:
                 "erros_consecutivos": ed.erros_consecutivos,
                 "ultimo_erro": ed.ultimo_erro,
                 "entrou_descanso_em": ed.entrou_descanso_em,
+                "descanso_ate": ed.descanso_ate,
                 "chamada_teste_ok": ed.chamada_teste_ok,
             }
         salvar_json(self.ARQUIVO_USO, dados)
@@ -451,6 +625,8 @@ class GerenciadorCerebros:
                 self._provedores.append(CerebroLocal(cfg))
             elif cfg.tipo in (TipoProvedor.NUVEM_PAGO, TipoProvedor.NUVEM_GRATIS):
                 self._provedores.append(CerebroGemini(cfg))
+            elif cfg.tipo == TipoProvedor.OPENAI:
+                self._provedores.append(CerebroOpenAI(cfg))
 
     def obter_provedor_ativo(self) -> CerebroBase | None:
         with self._lock:
@@ -475,36 +651,32 @@ class GerenciadorCerebros:
             self._ultimo_provedor_ativo = provedor_atual
             self._notificar_mudanca_cerebro(provedor_atual)
 
+        print(f"[cerebro] Modelo ativo: {provedores_ativos[0].config.nome} ({provedores_ativos[0].config.modelo})", flush=True)
+
         ultimo_erro = ""
         for provedor in provedores_ativos:
             if not self.verificar_limites(provedor.config.nome):
                 continue
 
-            # Tentativa principal
+            inicio = time.time()
             resultado = provedor.chat(mensagens, ferramentas)
+            duracao = time.time() - inicio
 
-            # Retry curto para 429 (limite por minuto) - apenas 1 retry
             if resultado.erro:
                 erro_lower = resultado.erro.lower()
                 if any(x in erro_lower for x in ["429", "quota", "cota"]):
-                    # Tenta extrair retry-after se vier no erro
-                    espera = self._extrair_retry_after(resultado.erro)
-                    if espera and espera <= 30:  # so espera se for curto (<=30s)
-                        time.sleep(espera)
-                        resultado = provedor.chat(mensagens, ferramentas)
-                        if not resultado.erro:
-                            # Sucesso no retry
-                            if resultado.tokens_entrada or resultado.tokens_saida:
-                                self.registrar_uso(provedor.config.nome, resultado.tokens_entrada, resultado.tokens_saida)
-                                self.verificar_limites(provedor.config.nome)
-                            self.registrar_sucesso(provedor.config.nome)
-                            return resultado
-                    # Se falhou ou espera longa, registra erro e tenta proximo provedor
+                    # Verifica se e cota diaria
+                    if any(x in erro_lower for x in ["perday", "per day", "daily"]):
+                        self._colocar_descanso_diario(provedor.config.nome)
+                        registrar_evento("cerebro", f"{provedor.config.nome} falhou (cota diaria)", f"proximo: {provedores_ativos[provedores_ativos.index(provedor)+1].config.nome if provedores_ativos.index(provedor)+1 < len(provedores_ativos) else 'nenhum'}", ok=False, duracao_ms=int(duracao * 1000))
+                    else:
+                        self._colocar_descanso_curto(provedor.config.nome)
+                        registrar_evento("cerebro", f"{provedor.config.nome} falhou (limite por minuto)", f"proximo: {provedores_ativos[provedores_ativos.index(provedor)+1].config.nome if provedores_ativos.index(provedor)+1 < len(provedores_ativos) else 'nenhum'}", ok=False, duracao_ms=int(duracao * 1000))
                     self.registrar_erro(provedor.config.nome, resultado.erro)
                     ultimo_erro = f"{provedor.config.nome}: {resultado.erro}"
                     continue
                 elif any(x in erro_lower for x in ["401", "403", "invalid", "unauthorized", "permission"]):
-                    # Chave invalida - erro claro, NAO troca em silencio
+                    registrar_evento("cerebro", f"{provedor.config.nome} falhou (chave invalida)", resultado.erro, ok=False, duracao_ms=int(duracao * 1000))
                     return ResultadoChat(
                         conteudo="",
                         erro=f"Chave invalida para {provedor.config.nome}: {resultado.erro}. Verifique a chave no Google AI Studio.",
@@ -520,9 +692,36 @@ class GerenciadorCerebros:
                 self.verificar_limites(provedor.config.nome)
 
             self.registrar_sucesso(provedor.config.nome)
+            registrar_evento("cerebro", f"{provedor.config.nome} respondeu em {duracao:.1f}s", f"tokens_in={resultado.tokens_entrada} tokens_out={resultado.tokens_saida}", ok=True, duracao_ms=int(duracao * 1000))
             return resultado
 
+        registrar_evento("cerebro", "Todos os provedores falharam", ultimo_erro, ok=False)
         return ResultadoChat(conteudo="", erro=f"Todos os provedores falharam: {ultimo_erro}", provedor_usado="")
+
+    def _proxima_meia_noite_la(self) -> float:
+        """Retorna timestamp da proxima meia-noite no fuso America/Los_Angeles."""
+        agora = datetime.now(ZoneInfo("America/Los_Angeles"))
+        proxima = agora.replace(hour=0, minute=0, second=0, microsecond=0)
+        if proxima <= agora:
+            from datetime import timedelta
+            proxima += timedelta(days=1)
+        return proxima.timestamp()
+
+    def _colocar_descanso_diario(self, provedor_nome: str):
+        with self._lock:
+            ed = self._estados.setdefault(provedor_nome, EstadoProvedorData())
+            ed.estado = EstadoProvedor.DESCANSO
+            ed.descanso_ate = self._proxima_meia_noite_la()
+            ed.entrou_descanso_em = time.time()
+            self._salvar_estados()
+
+    def _colocar_descanso_curto(self, provedor_nome: str):
+        with self._lock:
+            ed = self._estados.setdefault(provedor_nome, EstadoProvedorData())
+            ed.estado = EstadoProvedor.DESCANSO
+            ed.descanso_ate = time.time() + 60
+            ed.entrou_descanso_em = time.time()
+            self._salvar_estados()
 
     def _notificar_mudanca_cerebro(self, novo_provedor: str | None):
         """Chama callback registrado quando o cerebro ativo muda."""
@@ -618,9 +817,14 @@ class GerenciadorCerebros:
         with self._lock:
             agora = time.time()
             for ed in self._estados.values():
-                if ed.estado == EstadoProvedor.DESCANSO and agora - ed.entrou_descanso_em > 300:
-                    ed.estado = EstadoProvedor.ATIVO
-                    ed.erros_consecutivos = 0
+                if ed.estado == EstadoProvedor.DESCANSO:
+                    if ed.descanso_ate and agora >= ed.descanso_ate:
+                        ed.estado = EstadoProvedor.ATIVO
+                        ed.erros_consecutivos = 0
+                        ed.descanso_ate = 0
+                    elif not ed.descanso_ate and agora - ed.entrou_descanso_em > 300:
+                        ed.estado = EstadoProvedor.ATIVO
+                        ed.erros_consecutivos = 0
             self._salvar_estados()
 
     def status(self) -> dict:
