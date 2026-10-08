@@ -5,3 +5,4 @@ dados/
 config/spotify.json
 config/gemini.json
 config/openai.json
+venv/
