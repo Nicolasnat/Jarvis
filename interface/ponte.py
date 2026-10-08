@@ -23,6 +23,7 @@ class Ponte(QObject):
     comando_digitado = Signal(str)
     mic_clicado = Signal()
     wakeword = Signal()
+    evento_log = Signal(dict)  # Novo sinal para o painel de log
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -117,5 +118,12 @@ class Ponte(QObject):
         """Emite sinal quando a wakeword e detectada (abre/traz a janela)."""
         try:
             self.wakeword.emit()
+        except Exception:
+            pass
+
+    def emitir_evento_log(self, evento: dict) -> None:
+        """Emite evento para o painel de log."""
+        try:
+            self.evento_log.emit(dict(evento))
         except Exception:
             pass

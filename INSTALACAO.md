@@ -340,3 +340,30 @@ Editados em `config/protegidos.json` - o auto-aprimoramento NAO pode alterar:
 # Comparar com nuvem (requer chave)
 ./venv/bin/python nexus.py --teste-cerebro --cerebro nuvem
 ```
+ 
+### Painel de Log do Sistema (novo)
+ 
+A interface gráfica agora possui um painel de log integrado que mostra em tempo real tudo o que o Nexus está fazendo:
+ 
+- **Botão LOG** na barra de título (ao lado de minimizar/fechar)
+- **Atalho**: `Ctrl+L` alterna o painel
+- **Indicadores visuais**:
+  - Ponto pulsante ciano = atividade em tempo real
+  - Contador de eventos novos (não vistos)
+  - Ponto vermelho/âmbar = erro ou bloqueio de segurança recente
+- **Filtros** (chips): TUDO · COMANDOS · FERRAMENTAS · CÉREBRO · SEGURANÇA · ERROS
+- **Busca textual** "Filtrar..."
+- **Lista estilo terminal**: `[HH:MM:SS] TAG  titulo  EXEC #0042  duracao`
+- **Cores por tipo**: executando/ciano, concluído/verde, falha/âmbar-vermelho, segurança/vermelho
+- **Clique para expandir** detalhes (argumentos, resultado, saída do comando)
+- **Rolagem inteligente**: segue o fim automaticamente; se rolar para cima, pausa e mostra pílula "↓ NOVOS EVENTOS"
+- **Performance**: atualização visual a cada 100ms, mostra máx. 500 linhas na tela
+- **Rodapé**: "SESSÃO CRIPTOGRAFADA: N.E.X.U.S. KERNEL", "Fechar [ESC]", "Limpar tela" (só visual), "Exportar Telemetria" (salva .md mascarado)
+- **Atalho**: `Ctrl+L` abre/fecha; `ESC` fecha
+ 
+### Modo demo para testar o painel
+ 
+```bash
+# Simula eventos variados sem Ollama nem microfone
+./venv/bin/python nexus.py --interface --demo-log
+```
